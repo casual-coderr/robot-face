@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bit commands</title>
+<style>
+  :root {
+    --bg: #0a1220; --card: #111c30; --line: #223250; --text: #e8f1ff; --dim: #8aa0c4;
+    --blue: #3af; --blue-ink: #04223a; --bad: #ff7a7a; --ok: #6fe0a0; --pink: #ff6b94;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 20px 16px 60px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h1 span { color: var(--blue); }
+  .sub { color: var(--dim); margin: 0 0 18px; font-size: 14px; }
+  .sub a { color: var(--blue); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 18px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+  button { font: inherit; cursor: pointer; border-radius: 12px; border: 1px solid var(--line); background: #0d1626; color: var(--text); }
+  .cmd { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 8px; min-height: 76px; text-align: center; }
+  .cmd b { font-size: 15px; font-weight: 600; }
+  .cmd small { color: var(--dim); font-size: 12px; }
+  .cmd .ico { font-size: 22px; line-height: 1.1; }
+  .cmd:hover { border-color: var(--blue); }
+  .cmd:active { transform: scale(.97); }
+  .cmd.love:hover { border-color: var(--pink); }
+  .cmd.busy { border-color: var(--ok); }
+  label { display: block; font-size: 13px; color: var(--dim); margin: 12px 0 4px; }
+  label:first-of-type { margin-top: 0; }
+  input[type=text], select { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: #0d1626; color: var(--text); font: inherit; }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  button.primary { width: 100%; margin-top: 14px; padding: 12px; background: var(--blue); color: var(--blue-ink); border-color: var(--blue); font-weight: 700; }
+  #msg { min-height: 22px; margin-top: 4px; font-size: 14px; color: var(--ok); }
+  #msg.err { color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1><span>Bit</span> commands</h1>
+  <p class="sub">Tap a button and Bit does it on the panel, then goes back to normal. It can take up to 3 seconds to reach the panel. <a href="/reminders">Reminders</a></p>
+  <div id="msg" role="status"></div>
+
+  <section class="card">
+    <h2>Feelings</h2>
+    <div class="grid" id="feelings"></div>
+  </section>
+
+  <section class="card">
+    <h2>Tricks</h2>
+    <div class="grid" id="tricks"></div>
+  </section>
+
+  <section class="card">
+    <h2>Long sleep</h2>
+    <p class="sub" style="margin-bottom: 10px">Bit falls asleep for a while. If someone pokes it awake, it goes back to sleep after about 15 seconds, until the time is up.</p>
+    <div class="row">
+      <select id="nmins" aria-label="How long">
+        <option value="15">15 minutes</option>
+        <option value="30" selected>30 minutes</option>
+        <option value="60">1 hour</option>
+        <option value="120">2 hours</option>
+        <option value="240">4 hours</option>
+      </select>
+      <button type="button" class="primary" id="nap" style="margin-top: 0">Sleep for a while</button>
+    </div>
+    <button type="button" id="wake" style="width: 100%; margin-top: 10px; padding: 10px">Wake up now</button>
+  </section>
+
+  <form class="card" id="say" autocomplete="off">
+    <h2>Make Bit say something</h2>
+    <label for="stext">What should Bit say?</label>
+    <input type="text" id="stext" maxlength="40" placeholder="Dinner is ready!" required>
+    <label for="smood">With this face</label>
+    <select id="smood">
+      <option value="happy">Happy</option>
+      <option value="surprised">Surprised</option>
+      <option value="normal">Normal</option>
+      <option value="wink">Wink</option>
+      <option value="thinking">Thinking</option>
+      <option value="angry">Angry</option>
+      <option value="sad">Sad</option>
+      <option value="sleepy">Sleepy</option>
+    </select>
+    <button class="primary" type="submit">Say it</button>
+  </form>
+</main>
+<script>
+  var FEELINGS = [
+    ['happy', '\u{1F604}', 'Happy', 'yay!'],
+    ['wink', '\u{1F609}', 'Wink', 'one eye'],
+    ['angry', '\u{1F620}', 'Angry', 'grr!'],
+    ['furious', '\u{1F92C}', 'Furious', 'shaking, flickering'],
+    ['sad', '\u{1F622}', 'Sad', 'sniff...'],
+    ['lonely', '\u{1F97A}', 'Lonely', 'looks away'],
+    ['surprised', '\u{1F632}', 'Surprised', '!?'],
+    ['thinking', '\u{1F914}', 'Thinking', 'hmm...'],
+    ['yawn', '\u{1F971}', 'Yawn', 'sleepy eyes'],
+    ['sleep', '\u{1F634}', 'Sleep', 'z z z for 12 s']
+  ];
+  var TRICKS = [
+    ['love', '\u{1F60D}', 'Heart eyes', 'beating hearts', 'love'],
+    ['heart', '\u{2764}\u{FE0F}', 'Big heart', 'a heart for you', 'love'],
+    ['hello', '\u{1F44B}', 'Say hello', 'hello!'],
+    ['giggle', '\u{1F92D}', 'Giggle', 'hehe'],
+    ['song', '\u{1F3B5}', 'Sing', 'sways and bounces'],
+    ['read', '\u{1F4F0}', 'Newspaper', 'hides behind it'],
+    ['lookaround', '\u{1F440}', 'Look around', 'scans the room']
+  ];
+
+  var msg = document.getElementById('msg');
+  var msgTimer = 0;
+  function say(text, bad) {
+    msg.textContent = text;
+    msg.className = bad ? 'err' : '';
+    clearTimeout(msgTimer);
+    msgTimer = setTimeout(function () { msg.textContent = ''; }, 5000);
+  }
+
+  function send(name, extra, label, btn) {
+    var url = '/api/command?name=' + encodeURIComponent(name) + (extra || '');
+    if (btn) { btn.classList.add('busy'); setTimeout(function () { btn.classList.remove('busy'); }, 1500); }
+    fetch(url).then(function (r) { return r.json(); }).then(function (j) {
+      if (j.ok) { say('Sent: ' + label + '. Bit will do it in a moment.'); }
+      else { say('Bit did not understand that one.', true); }
+    }).catch(function () { say('Could not reach the server.', true); });
+  }
+
+  function build(list, host) {
+    list.forEach(function (c) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cmd' + (c[4] ? ' ' + c[4] : '');
+      var ico = document.createElement('span'); ico.className = 'ico'; ico.textContent = c[1];
+      var name = document.createElement('b'); name.textContent = c[2];
+      var hint = document.createElement('small'); hint.textContent = c[3];
+      b.appendChild(ico); b.appendChild(name); b.appendChild(hint);
+      b.addEventListener('click', function () { send(c[0], '', c[2], b); });
+      host.appendChild(b);
+    });
+  }
+  build(FEELINGS, document.getElementById('feelings'));
+  build(TRICKS, document.getElementById('tricks'));
+
+  document.getElementById('nap').addEventListener('click', function () {
+    var m = document.getElementById('nmins');
+    send('nap', '&text=' + m.value, 'sleep for ' + m.options[m.selectedIndex].text, this);
+  });
+  document.getElementById('wake').addEventListener('click', function () { send('wake', '', 'wake up', this); });
+  document.getElementById('say').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var t = document.getElementById('stext').value.trim();
+    if (!t) { return; }
+    send('say', '&text=' + encodeURIComponent(t) + '&mood=' + encodeURIComponent(document.getElementById('smood').value), '“' + t + '”');
+  });
+</script>
+</body>
+</html>

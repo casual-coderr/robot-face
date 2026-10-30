@@ -1,0 +1,45 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<title>Sound test</title>
+<style type="text/css">
+body { margin: 0; padding: 4px; background: #000; color: #3ff; font: 12px Arial, sans-serif; }
+a.b { display: block; float: left; width: 146px; height: 44px; margin: 3px; background: #123; color: #3ff;
+      border: 1px solid #3ff; text-align: center; line-height: 44px; text-decoration: none; font-size: 14px; }
+#ua { clear: both; padding-top: 6px; color: #789; font-size: 10px; }
+#status { clear: both; color: #ff8; font-size: 12px; padding-top: 4px; }
+</style>
+</head>
+<body>
+Tap each button. Which ones make a sound? Tell Claude the numbers.
+<div style="clear:both"></div>
+<a class="b" href="#" onclick="m1(); return false;">1 bgsound</a>
+<a class="b" href="#" onclick="m2(); return false;">2 embed</a>
+<a class="b" href="#" onclick="m3(); return false;">3 WMP object</a>
+<a class="b" href="#" onclick="m4(); return false;">4 MPlayer object</a>
+<a class="b" href="#" onclick="m5(); return false;">5 hidden iframe</a>
+<a class="b" href="#" onclick="m6(); return false;">6 visible embed</a>
+<a class="b" href="sounds/happy.wav">7 direct link</a>
+<div id="status">ready</div>
+<div id="ua"></div>
+<div id="slot" style="position:absolute; left:0; top:0; width:1px; height:1px; overflow:hidden;"></div>
+<script type="text/javascript">
+var U = 'sounds/happy.wav';
+var slot = document.getElementById('slot');
+function say(t) { document.getElementById('status').innerHTML = t; }
+function put(html, n) { slot.innerHTML = ''; slot.innerHTML = html; say('method ' + n + ' sent (' + new Date().getTime() % 100000 + ')'); }
+
+function m1() { put('<bgsound src="' + U + '" loop="1">', 1); }
+function m2() { put('<embed src="' + U + '" autostart="true" hidden="true" loop="false" width="1" height="1">', 2); }
+function m3() { put('<object classid="clsid:6BF52A52-394A-11D3-B153-00C04F79FAA6" width="1" height="1">' +
+  '<param name="URL" value="' + U + '"><param name="autoStart" value="1"></object>', 3); }
+function m4() { put('<object classid="clsid:22D6F312-B0F6-11D0-94AB-0080C74C7E95" width="1" height="1">' +
+  '<param name="FileName" value="' + U + '"><param name="AutoStart" value="1"></object>', 4); }
+function m5() { put('<iframe src="' + U + '" width="1" height="1" frameborder="0"></iframe>', 5); }
+function m6() { slot.style.width = '140px'; slot.style.height = '40px'; slot.style.top = '180px';
+  put('<embed src="' + U + '" autostart="true" width="140" height="40">', 6); }
+
+document.getElementById('ua').innerHTML = 'UA: ' + navigator.userAgent;
+</script>
+</body>
+</html>

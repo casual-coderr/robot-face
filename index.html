@@ -1,0 +1,1024 @@
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<title>Bit - IOVU-430S</title>
+<style type="text/css">
+html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+#screen { position: absolute; left: 0; top: 0; width: 480px; height: 272px; background: #000; overflow: hidden; }
+.px { position: absolute; background: #3af; font-size: 0; line-height: 0; }
+.z { position: absolute; display: none; color: #3ff; font: bold 14px Arial, sans-serif; line-height: 1; }
+#label { position: absolute; left: 0; top: 6px; width: 480px; text-align: center; color: #3a5560; font: 11px Arial, sans-serif; }
+#clock { position: absolute; right: 10px; top: 6px; color: #4a6a8a; font: 14px Arial, sans-serif; }
+#note { position: absolute; left: 20px; top: 208px; width: 440px; height: 54px; text-align: center; color: #f0f6ff; font: bold 22px Arial, sans-serif; line-height: 26px; }
+.horn { position: absolute; display: none; background: #f22; font-size: 0; line-height: 0; }
+.book { position: absolute; display: none; font-size: 0; line-height: 0; }
+.bk { position: absolute; font-size: 0; line-height: 0; }
+.heart { position: absolute; display: none; background: #f47; font-size: 0; line-height: 0; }
+.tear { position: absolute; display: none; width: 6px; height: 11px; background: #8cf; font-size: 0; line-height: 0; }
+</style>
+</head>
+<body>
+<!--
+  Robot face for the IEI IOVU-430S (4.3" 480x272, Windows CE 6.0 browser).
+  ES3 + plain divs only: no canvas, no CSS3, no JSON.parse, no frameworks.
+  Each eye is built from vertical slices so rounded corners, angry/sad lids
+  and happy arches all come from simple rectangle geometry.
+
+  The page polls api/state every 2 s (see server.py): reminders and notify calls
+  from your other projects appear as a mood + a line of text + a sound.
+  Tap = happy blip (or dismiss a notice). Hold = giggle. Drag = eyes follow.
+  Top-left corner = mute.
+-->
+<div id="screen"><div id="label"></div><div id="clock"></div><div id="note"></div></div>
+<div id="sndslot" style="position:absolute; left:0; top:0; width:1px; height:1px; overflow:hidden;"></div>
+<script type="text/javascript" src="reminders.js"></script>
+<script type="text/javascript">
+var W = 480, H = 272;
+// Report problems to the server log (the panel has no console), so we can see what its old IE chokes on.
+var logCount = 0;
+function logToServer(msg) {
+  if (logCount++ > 30) { return; }
+  try {
+    var sc = document.createElement('script');
+    sc.type = 'text/javascript';
+    sc.src = 'api/log?m=' + encodeURIComponent(String(msg).substring(0, 300)) + '&_=' + (new Date()).getTime();
+    document.getElementsByTagName('head')[0].appendChild(sc);
+  } catch (err) { }
+}
+window.onerror = function (msg, url, line) { logToServer('error: ' + msg + ' (line ' + line + ')'); return true; };
+logToServer('boot');
+
+// ---- mounted upside down: the whole face is drawn rotated 180 degrees ----
+// Eyes and touch are mirrored in code (works in any browser). Text is rotated with CSS where
+// the browser can; the old Windows CE IE can't, so there it falls back to upside-down characters.
+// OFF by default: the panel's fonts lack upside-down letters, so text showed as square boxes.
+// Add #flip to the address to try it (eyes and touch flip fine; text needs a pixel font to work there).
+var HASH = window.location.hash;
+// Halloween theme (pumpkin eyes, devil horns, orange/red colours) is ON HOLD: blue everywhere.
+// Set true, or add #halloween to the address, to bring it back.
+var HALLOWEEN = (HASH.indexOf('halloween') >= 0);
+// STANDALONE = no PC needed: opened from a file (microSD card) or with #standalone. It then keeps its own
+// time from the panel's clock and its reminders from reminders.js, and never polls a server.
+var STANDALONE = (window.location.protocol === 'file:') || HASH.indexOf('standalone') >= 0;
+var SMALL = !!(window.screen && screen.width && screen.width <= 520);   // the panel's own 480x272 screen
+var ONPANEL = SMALL || HASH.indexOf('panel') >= 0;
+var NOFLIP = (HASH.indexOf('noflip') >= 0);
+var FLIP = !NOFLIP && HASH.indexOf('flip') >= 0;
+var ROTPROP = null;
+(function () {
+  var st = document.documentElement.style;
+  var names = ['transform', 'msTransform', 'webkitTransform'];
+  for (var i = 0; i < names.length; i++) { if (names[i] in st) { ROTPROP = names[i]; break; } }
+  if (HASH.indexOf('glyph') >= 0) { ROTPROP = null; }     // force the fallback (for testing)
+})();
+var FLIP_FROM = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?\'()[]{}<>_;&';
+var FLIP_TO = '\u0250q\u0254p\u01dd\u025f\u0183\u0265\u1d09\u027e\u029el\u026fuodb\u0279s\u0287n\u028c\u028dx\u028ez\u2200\u15fa\u0186\u15e1\u018e\u2132\u2141HI\u017f\u029e\u2142WNO\u0500\u038c\u1d1aS\u22a5\u2229\u039bMX\u2144Z0\u0196\u1105\u0190\u3123\u03db9\u312586\u02d9\'\u00a1\u00bf,)(][}{><\u203e\u061b\u214b';
+function flipText(s) {
+  var out = '';
+  for (var i = s.length - 1; i >= 0; i--) {              // reversed, each character upside down
+    var k = FLIP_FROM.indexOf(s.charAt(i));
+    out += (k >= 0) ? FLIP_TO.charAt(k) : s.charAt(i);
+  }
+  return out;
+}
+function setText(el, s) {
+  s = String(s);
+  if (FLIP && !ROTPROP) { s = flipText(s); }
+  el.innerHTML = esc(s);
+}
+var N = 12;                       // slices per eye (fewer divs = faster on the panel)
+var CY = 120, EX = [150, 330];    // eye centre y, eye centre x (left, right)
+var FRAME_MS = 50;
+var POLL_MS = 3000;
+
+var screenEl = document.getElementById('screen');
+var labelEl = document.getElementById('label');
+var clockEl = document.getElementById('clock');
+var noteEl = document.getElementById('note');
+
+var MOODS = {
+  normal:    { name: 'normal',    L: { w:100, h:110, tilt:0,  arch:0 }, R: { w:100, h:110, tilt:0,  arch:0 }, lx:0,  ly:0 },
+  happy:     { name: 'happy',     L: { w:100, h:100, tilt:0,  arch:1 }, R: { w:100, h:100, tilt:0,  arch:1 }, lx:0,  ly:0 },
+  wink:      { name: 'wink',      L: { w:100, h:110, tilt:0,  arch:0 }, R: { w:100, h:100, tilt:0,  arch:1 }, lx:0,  ly:0 },
+  angry:     { name: 'angry',     L: { w:104, h:92,  tilt:1,  arch:0 }, R: { w:104, h:92,  tilt:1,  arch:0 }, lx:0,  ly:4 },
+  sad:       { name: 'sad',       L: { w:96,  h:92,  tilt:-1, arch:0 }, R: { w:96,  h:92,  tilt:-1, arch:0 }, lx:0,  ly:8 },
+  surprised: { name: 'surprised', L: { w:78,  h:130, tilt:0,  arch:0 }, R: { w:78,  h:130, tilt:0,  arch:0 }, lx:0,  ly:-4 },
+  thinking:  { name: 'thinking',  L: { w:88,  h:88,  tilt:0.3,arch:0 }, R: { w:88,  h:88,  tilt:0.3,arch:0 }, lx:30, ly:-26 },
+  sleepy:    { name: 'sleepy',    L: { w:108, h:40,  tilt:0.5,arch:0 }, R: { w:108, h:40,  tilt:0.5,arch:0 }, lx:0,  ly:14 },
+  reading:   { name: 'reading',   L: { w:100, h:96,  tilt:0,  arch:0 }, R: { w:100, h:96,  tilt:0,  arch:0 }, lx:0,  ly:-8 },
+  lonely:    { name: 'lonely',    L: { w:92,  h:88,  tilt:-1, arch:0 }, R: { w:92,  h:88,  tilt:-1, arch:0 }, lx:-34, ly:14 },  // sad, looking away
+  asleep:    { name: 'asleep',    L: { w:96,  h:40,  tilt:0,  arch:0, cup:1 }, R: { w:96, h:40, tilt:0, arch:0, cup:1 }, lx:0, ly:22 },   // closed, curved eyes
+  pumpkin:   { name: 'pumpkin',   L: { w:98,  h:92,  tilt:0,  arch:0, tri:1 }, R: { w:98, h:92, tilt:0, arch:0, tri:1 }, lx:0, ly:-2 },   // jack-o'-lantern eyes
+  devil:     { name: 'devil',     L: { w:108, h:84,  tilt:1.2,arch:0 }, R: { w:108, h:84, tilt:1.2, arch:0 }, lx:0, ly:6 }                   // angry, red, with horns
+};
+
+function now() { return new Date().getTime(); }
+function rnd(a, b) { return a + Math.random() * (b - a); }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function two(n) { return (n < 10 ? '0' : '') + n; }
+
+// current (eased) eye parameters
+var cur = [ { w:100, h:110, tilt:0, arch:0, cup:0, tri:0 }, { w:100, h:110, tilt:0, arch:0, cup:0, tri:0 } ];
+var tgt = [ MOODS.normal.L, MOODS.normal.R ];
+var lookX = 0, lookY = 0, lookTX = 0, lookTY = 0;
+var mood = MOODS.normal;
+
+var nextBlink = now() + 1500, blinkStart = 0;
+var nextLook = now() + 1500;
+var dragging = false;
+var labelUntil = 0;
+
+// build the slice divs
+var slices = [[], []];
+for (var e = 0; e < 2; e++) {
+  for (var i = 0; i < N; i++) {
+    var d = document.createElement('div');
+    d.className = 'px';
+    screenEl.appendChild(d);
+    slices[e].push(d);
+  }
+}
+// last values written to each slice: DOM writes are the slow part on the panel, so skip unchanged ones
+var cache = [[], []];
+for (var ce = 0; ce < 2; ce++) {
+  for (var ci = 0; ci < N; ci++) { cache[ce].push({ l: -9999, w: -1, t: -9999, h: -1 }); }
+}
+
+// floating "z" letters for the sleeping animation (a small pool that gets reused)
+var zs = [];
+for (var k = 0; k < 5; k++) {
+  var zd = document.createElement('div');
+  zd.className = 'z';
+  zd.innerHTML = 'z';
+  screenEl.appendChild(zd);
+  zs.push({ el: zd, born: 0, dur: 0, x: 0, y: 0 });
+}
+
+// devil horns (5 stacked rows per horn) and a tear drop for when it's lonely
+var horns = [[], []];
+for (var hs = 0; hs < 2; hs++) {
+  for (var hr = 0; hr < 5; hr++) {
+    var hd = document.createElement('div');
+    hd.className = 'horn';
+    screenEl.appendChild(hd);
+    horns[hs].push(hd);
+  }
+}
+// pixel hearts for the 'love' (heart eyes) and 'heart' (one big heart) routines: 8 rows, 10 divs each
+var HEART_ROWS = [[1,2,6,7], [0,3,5,8], [0,8], [0,8], [1,7], [2,6], [3,5], [4,4]];   // column spans per row
+var hearts = [[], []], heartKey = ['', ''], eyesHidden = false;
+for (var hh2 = 0; hh2 < 2; hh2++) {
+  for (var hrow = 0; hrow < HEART_ROWS.length; hrow++) {
+    for (var hsp = 0; hsp < HEART_ROWS[hrow].length / 2; hsp++) {
+      var hdv = document.createElement('div');
+      hdv.className = 'heart';
+      screenEl.appendChild(hdv);
+      hearts[hh2].push({ el: hdv, row: hrow, a: HEART_ROWS[hrow][hsp * 2], b: HEART_ROWS[hrow][hsp * 2 + 1] });
+    }
+  }
+}
+// a newspaper for the 'read' routine, seen from the front like someone hiding behind it: the viewer sees its
+// outside page (headline, photo, columns), the lower half of the eyes is hidden, and the eyes peek over the top.
+// Everything lives inside one div, so moving the paper is two style writes.
+var paper = document.createElement('div');
+paper.className = 'book';
+paper.style.left = '70px'; paper.style.top = '116px'; paper.style.width = '340px'; paper.style.height = '220px';
+paper.style.background = '#e9e4d4';
+screenEl.appendChild(paper);
+function pk(l, t, w, h, color) {
+  var d = document.createElement('div');
+  d.className = 'bk';
+  d.style.left = l + 'px'; d.style.top = t + 'px'; d.style.width = w + 'px'; d.style.height = h + 'px';
+  d.style.background = color;
+  paper.appendChild(d);
+  return d;
+}
+pk(0, 0, 5, 220, '#cfc9b4'); pk(335, 0, 5, 220, '#cfc9b4');      // edges
+pk(168, 0, 3, 220, '#c3bda7');                                    // the fold
+var mast = pk(20, 5, 300, 17, '#e9e4d4');                         // masthead: the paper's name in bold print
+mast.style.font = 'bold 15px Arial, sans-serif'; mast.style.lineHeight = '17px'; mast.style.textAlign = 'center';
+mast.style.color = '#2e2e2e'; mast.innerHTML = 'NEWSPAPER';
+pk(20, 24, 300, 2, '#3a3a3a');
+var heads = [pk(20, 34, 210, 11, '#2e2e2e'), pk(20, 50, 140, 11, '#2e2e2e')];   // headline
+pk(236, 34, 84, 56, '#a9b4bf'); pk(246, 56, 64, 28, '#8793a1');   // photo
+var linesA = [], linesB = [];                                     // columns of small print
+for (var pl = 0; pl < 8; pl++) {
+  linesA.push(pk(20, 76 + pl * 13, 140, 4, '#8a8672'));
+  linesB.push(pk(182, 100 + pl * 13, 138, 4, '#8a8672'));
+}
+pk(-8, 86, 16, 26, '#cfe3f7'); pk(332, 86, 16, 26, '#cfe3f7');     // two thumbs gripping the sides
+var bookShown = false, paperKey = '', paperSeed = -1;
+
+function newPage(j) {                                              // each page of print looks a bit different
+  for (var i = 0; i < 8; i++) {
+    linesA[i].style.width = (140 - ((j * 53 + i * 37) % 5) * 18) + 'px';
+    linesB[i].style.width = (138 - ((j * 41 + i * 29) % 5) * 18) + 'px';
+  }
+  heads[0].style.width = (210 - ((j * 47) % 4) * 20) + 'px';
+  heads[1].style.width = (140 - ((j * 31) % 4) * 22) + 'px';
+}
+
+function drawBook(t) {
+  var want = !!act && act.name === 'read';
+  if (want !== bookShown) {
+    bookShown = want; paperKey = ''; paperSeed = -1;
+    paper.style.display = want ? 'block' : 'none';
+  }
+  if (!want) { return; }
+  var el = t - act.start, p, dy = 0, dx = 0;
+  if (el < 700) { p = 1 - el / 700; dy = Math.round(160 * p * p); }                     // lifts the paper up
+  else if (el >= 7000 && el < 7600) { dy = Math.round(40 * (el - 7000) / 600); }         // lowers it to look at you
+  else if (el >= 7600 && el < 8700) { dy = 40; }
+  else if (el >= 8700) { p = Math.min(1, (el - 8700) / 800); dy = Math.round(40 + 140 * p * p); }   // and away
+  var seed = 0;
+  var tt = el - 1800;                                                                    // a page turn every 2.3 s
+  if (tt >= 0 && el < 6900) {
+    var n = Math.floor(tt / 2300), u = tt % 2300;
+    seed = n + (u >= 120 ? 1 : 0);
+    if (u < 500) { dx = Math.round(5 * Math.sin(u / 35) * (1 - u / 500)); }              // the paper rustles
+  } else if (tt >= 0) { seed = 3; }
+  if (seed !== paperSeed) { paperSeed = seed; newPage(seed); }
+  var key = dx + ',' + dy;
+  if (key !== paperKey) {
+    paperKey = key;
+    paper.style.left = (70 + dx) + 'px';
+    paper.style.top = (116 + dy) + 'px';
+  }
+}
+
+var tearEl = document.createElement('div');
+tearEl.className = 'tear';
+screenEl.appendChild(tearEl);
+
+// ---------------------------------------------------------------- server state
+var serverTs = 0, serverAt = 0;   // server local time (epoch s) and when we received it
+var night = [21, 7];
+var notice = null;                // current notice from the server
+var shownId = null, lastChime = 0;
+var connLost = false;
+var toast = null;                 // local short-lived reaction: { text, mood, until }
+var colorNight = false;
+var joltUntil = 0;                // a notice makes it jump first: it startles easily
+
+// ---- pet behaviour: how it's been treated decides how it feels ----
+// Add ?fast to the address to run the lonely timers 20x quicker when testing.
+var TS = (window.location.search.indexOf('fast') >= 0) ? 0.05 : 1;
+var T_BORED = 45000 * TS, T_LONELY = 120000 * TS, T_SULK = 240000 * TS, T_SLEEP = 420000 * TS;   // 45 s, 2, 4, 7 min
+var lastTouch = now();            // last time anyone touched it
+var napUntil = 0;                 // a long sleep from /commands: when poked awake it dozes off again until then
+try {                             // a timed reload hands the "last touched" time over via window.name
+  if (window.name.indexOf('bit:') === 0) {
+    var wp = window.name.substring(4).split(':');
+    var lt0 = Number(wp[0]);
+    if (lt0 > 0 && lt0 <= now()) { lastTouch = lt0; }
+    var nu0 = Number(wp[1]);
+    if (nu0 > now()) { napUntil = nu0; }
+    window.name = '';
+  }
+} catch (err) { }
+var stage = 0;                    // 0 happy, 1 bored, 2 lonely, 3 sulking, 4 asleep
+var S_MIN = 60000 * TS, S_MAX = T_SLEEP;      // when left alone it dozes off at a random time between these
+var sleepAfter = rnd(S_MIN, S_MAX);          // re-rolled every time it is touched
+var lastWhimper = 0;
+var tapCount = 0, lastTap = 0;    // quick taps in a row make it annoyed
+var welcomeBack = false;          // it was lonely when this touch started
+
+// The old Windows CE IE may have no usable XMLHttpRequest, so we talk to the server the
+// oldest way there is: inject <script src="api/state?cb=onState"> and let the reply call us.
+var lastOk = now();
+var pollEl = null;
+var OFFLINE_MS = 8000;
+
+function onState(s) {
+  lastOk = now();
+  if (connLost) { connLost = false; toastNow('Back online', 'happy', null, 3000); }
+  serverTs = s.ts; serverAt = now(); night = s.night;
+  if (s.sound) { SOUND_MODE = s.sound; }
+  if (s.cmd && s.cmd.id !== lastCmdId) { lastCmdId = s.cmd.id; try { runCommand(s.cmd); } catch (err) { logToServer('command failed: ' + err.message); } }
+  notice = s.notice;
+  if (notice && (notice.id + '|' + notice.text) === dismissed && now() - dismissedAt < 3600000) {
+    notice = null;                         // you already dismissed this one
+  }
+  if (notice) {
+    if (notice.id !== shownId) {
+      shownId = notice.id; lastChime = now(); joltUntil = now() + 700;
+      playSound(notice.sound, true, true);
+    } else if (notice.sticky && now() - lastChime > 30000) {
+      lastChime = now();                  // sticky notices chime again until you tap
+      playSound(notice.sound, true, true);
+    }
+  } else { shownId = null; }
+}
+
+// a command from the /commands page: Bit does it, then goes back to whatever it was doing
+var lastCmdId = 0;
+var CMDS = {            // name: [text, face, sound, ms]
+  happy:     ['yay!', 'happy', 'happy', 3000],
+  wink:      ['', 'wink', 'wink', 2500],
+  angry:     ['grr!', 'angry', 'angry', 3500],
+  sad:       ['sniff...', 'sad', 'sad', 4000],
+  lonely:    ['...you there?', 'lonely', null, 5000],
+  surprised: ['!?', 'surprised', 'surprised', 2500],
+  thinking:  ['hmm...', 'thinking', 'thinking', 4000],
+  yawn:      ['*yawn*', 'sleepy', null, 3500],
+  hello:     ['hello!', 'happy', 'happy', 3000]
+};
+function runCommand(c) {
+  var n = c.name;
+  if (n === 'furious') { toastNow('STOP IT!', 'angry', 'angry', 4500, null, true); return; }
+  if (n === 'sleep') { toastNow('zzz...', 'asleep', null, 12000, { text: '*yawn*', mood: 'sleepy', sound: null, ms: 2500, next: null }); return; }
+  if (n === 'giggle') { startAct('giggle', 'hehe'); return; }
+  if (n === 'song') { startAct('song', 'la la la'); return; }
+  if (n === 'love') { startAct('love', ''); return; }
+  if (n === 'heart') { startAct('heart', ''); return; }
+  if (n === 'lookaround') { startAct('lookaround', ''); return; }
+  if (n === 'read') { startAct('read', ''); return; }
+  if (n === 'nap') {
+    var mins = parseInt(c.text, 10);
+    if (!(mins > 0 && mins <= 720)) { mins = 30; }
+    napUntil = now() + mins * 60000;
+    lastTouch = now() - 16000;                              // falls asleep right away
+    return;
+  }
+  if (n === 'wake') { napUntil = 0; lastTouch = now(); toastNow('Good morning!', 'happy', null, 3500); return; }
+  if (n === 'say') { toastNow(c.text || '', MOODS[c.mood] ? c.mood : 'happy', null, 5000); return; }
+  var d = CMDS[n];
+  if (d) { toastNow(d[0], d[1], d[2], d[3]); }
+}
+
+function poll() {
+  if (STANDALONE) { return; }           // no server to ask
+  setTimeout(poll, POLL_MS);
+  var head = document.getElementsByTagName('head')[0];
+  if (pollEl) { try { head.removeChild(pollEl); } catch (err) { } }
+  pollEl = document.createElement('script');
+  pollEl.type = 'text/javascript';
+  pollEl.src = 'api/state?cb=onState&sw=' + (window.screen ? screen.width : 0) + '&f=' + (FLIP ? 1 : 0) + '&_=' + now();   // sw/f show up in the server log
+  head.appendChild(pollEl);
+  if (!connLost && now() - lastOk > OFFLINE_MS) {      // no reply for a while: PC is gone
+    connLost = true;
+  }
+}
+
+// Tell the server the notice was dismissed. An <img> request never arrived from the panel's old IE
+// (the server log showed no acks at all), so use a script tag, the same trick the status checks use.
+function onAck() { }
+function sendAck(id) {
+  if (STANDALONE) { return; }
+  var head = document.getElementsByTagName('head')[0];
+  var sc = document.createElement('script');
+  sc.type = 'text/javascript';
+  sc.src = 'api/ack?id=' + id + '&cb=onAck&_=' + now();
+  head.appendChild(sc);
+  setTimeout(function () { try { head.removeChild(sc); } catch (err) { } }, 8000);
+}
+// belt and braces: even if the server never hears about it, a notice you dismissed does not come back
+var dismissed = '', dismissedAt = 0;
+
+// ---- standalone mode: clock and reminders come from the panel itself ----
+var REMS = (typeof REMINDERS !== 'undefined') ? REMINDERS : [];
+var firedKeys = {}, localId = 0, nextSync = 0, nextRem = 0;
+var DAYNAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+function syncLocal() {                    // same "local time as epoch seconds" the server would send
+  serverTs = Math.floor(now() / 1000) - (new Date()).getTimezoneOffset() * 60;
+  serverAt = now();
+}
+function dayOk(days, day) {
+  if (!days || days === 'daily') { return true; }
+  for (var i = 0; i < days.length; i++) { if (days[i] === day) { return true; } }
+  return false;
+}
+function localTick(t) {
+  if (t >= nextSync) { nextSync = t + 60000; syncLocal(); }
+  if (notice && notice.until && t > notice.until) { notice = null; shownId = null; }
+  if (notice && notice.sticky && t - lastChime > 30000) {      // sticky reminders chime again until tapped
+    lastChime = t;
+    playSound(notice.sound, true, true);
+  }
+  if (t < nextRem) { return; }
+  nextRem = t + 5000;
+  var d = clockDate();                                          // UTC getters read as local time
+  var hhmm = two(d.getUTCHours()) + ':' + two(d.getUTCMinutes());
+  var dateKey = d.getUTCFullYear() + '-' + d.getUTCMonth() + '-' + d.getUTCDate();
+  var isoDate = d.getUTCFullYear() + '-' + two(d.getUTCMonth() + 1) + '-' + two(d.getUTCDate());
+  for (var i = 0; i < REMS.length; i++) {
+    var r = REMS[i];
+    if (r.enabled === false || r.time !== hhmm || !dayOk(r.days, DAYNAMES[d.getUTCDay()])) { continue; }
+    if (r.date && r.date !== isoDate) { continue; }                 // a one-off for another day
+    var key = dateKey + '#' + i;
+    if (firedKeys[key]) { continue; }
+    firedKeys[key] = true;
+    var sticky = (r.sticky !== false);
+    localId++;
+    notice = { id: localId, text: r.text || 'Reminder', mood: r.mood || 'surprised', sound: r.sound || 'alert',
+               sticky: sticky, until: sticky ? 0 : t + (r.seconds || 60) * 1000 };
+    shownId = localId; lastChime = t; joltUntil = t + 700;
+    playSound(notice.sound, true, true);
+  }
+}
+
+// the clock follows the server's time but keeps running by itself if the PC goes away
+function clockDate() {
+  if (!serverTs) { return null; }
+  return new Date(serverTs * 1000 + (now() - serverAt));
+}
+function isNight() {
+  var d = clockDate();
+  if (!d) { return false; }
+  var h = d.getUTCHours();
+  return (night[0] > night[1]) ? (h >= night[0] || h < night[1]) : (h >= night[0] && h < night[1]);
+}
+var DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+var lastClock = '';
+function drawClock() {
+  var d = clockDate();
+  if (!d) { return; }
+  var s = DOW[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MON[d.getUTCMonth()] + '  ' +
+          two(d.getUTCHours()) + ':' + two(d.getUTCMinutes());
+  if (s !== lastClock) { lastClock = s; setText(clockEl, s); }
+}
+
+// ---------------------------------------------------------------- sound
+// Windows CE's IE has no <audio>/Web Audio or <bgsound>, but a hidden <embed> plays
+// (confirmed on the panel); desktops use Audio.
+var soundOn = true;
+// Every sound on the panel launches Windows CE's media player (the flying Windows flag), which breaks the
+// full-screen feel. So by default only reminders/notices make a sound there ('alerts'). The server can
+// change this (SOUND_MODE in server.py): 'all' = every reaction, 'alerts' = notices only, 'off' = silent.
+var SOUND_MODE = 'alerts';
+var slotEl = document.getElementById('sndslot');
+var audioOk = (typeof Audio !== 'undefined');
+function playSound(name, force, notice) {
+  if (!soundOn || SOUND_MODE === 'off') { return; }
+  if (!audioOk && SOUND_MODE === 'alerts' && !notice) { return; }   // panel: skip the player launch for taps
+  if (!force && isNight()) { return; }      // stay quiet at night unless something real needs you
+  var url = 'sounds/' + name + '.wav';
+  try {
+    if (audioOk) {
+      var a = new Audio(url);
+      a.volume = 0.8;
+      var pr = a.play();
+      if (pr && pr['catch']) { pr['catch'](function () {}); }   // autoplay blocked until first tap
+    } else {
+      slotEl.innerHTML = '';   // clear first so the same file can retrigger
+      slotEl.innerHTML = '<embed src="' + url + '" autostart="true" hidden="true" loop="false" width="1" height="1">';
+    }
+  } catch (err) { }
+}
+
+// ---------------------------------------------------------------- behaviour
+var act = null;   // scripted routine: song (sway + bounce) or giggle (jiggle)
+function startAct(name, text) {
+  var durs = { song: 2500, love: 4000, heart: 4000, lookaround: 3600, read: 9600 };
+  act = { name: name, start: now(), dur: durs[name] || 1000 };
+  toast = null;
+  setMood(name === 'read' ? MOODS.reading : MOODS.happy);
+  curKey = '';
+  setText(noteEl, text || '');
+  if (name === 'song' || name === 'giggle') { playSound(name, true); }
+}
+
+// a short-lived reaction; `next` (same fields) plays when it ends, e.g. angry -> sulk
+function toastNow(text, moodName, sound, ms, next, shake) {
+  toast = { text: text, mood: MOODS[moodName], until: now() + ms, next: next || null, shake: !!shake };
+  if (sound) { playSound(sound, false); }
+}
+
+// what the face should be showing right now:
+// notice > offline > reaction > how lonely it is > time of day
+function wanted() {
+  if (notice) {
+    if (now() < joltUntil) { return { mood: MOODS.surprised, text: '!' }; }
+    return { mood: MOODS[notice.mood] || MOODS.surprised, text: notice.text };
+  }
+  if (connLost) { return { mood: MOODS.sad, text: 'PC offline' }; }
+  if (toast && now() >= toast.until && toast.next) {
+    var n = toast.next;
+    toast = null;
+    toastNow(n.text, n.mood, n.sound, n.ms, n.next);
+  }
+  if (toast && now() < toast.until) { return { mood: toast.mood, text: toast.text }; }
+  if (isNight() || stage === 4) { return { mood: MOODS.asleep, text: '' }; }
+  if (stage === 3) { return { mood: MOODS.lonely, text: '' }; }
+  if (stage === 2) { return { mood: MOODS.sad, text: '' }; }
+  return { mood: MOODS.normal, text: '' };
+}
+
+// stage changes as time passes without a touch
+function updateStage() {
+  var idle = now() - lastTouch;
+  var s = 0;
+  if (!isNight()) {
+    s = idle > sleepAfter ? 4 : idle > T_SULK ? 3 : idle > T_LONELY ? 2 : idle > T_BORED ? 1 : 0;
+    if (napUntil) {
+      if (now() > napUntil) {                               // the long sleep is over
+        napUntil = 0; lastTouch = now(); sleepAfter = rnd(S_MIN, S_MAX); s = 0;
+        toastNow('Good morning!', 'happy', null, 4000);
+      } else if (idle > 15000) { s = 4; }                   // poked awake? back to sleep after 15 s
+    }
+  }
+  if (s !== stage) {
+    stage = s;
+    // nobody is touching it, so it never makes a sound on its own
+    if (s === 1) { toastNow('*yawn*', 'sleepy', null, 3500); }
+    else if (s === 2) { toastNow('hello?', 'sad', null, 4000); }
+    else if (s === 3) { toastNow('...you there?', 'lonely', null, 5000); }
+    else if (s === 4) { toastNow('zzz...', 'sleepy', null, 2500); }        // nods off
+  }
+}
+
+// reaction to being poked repeatedly
+var FINE = { text: '...fine.', mood: 'wink', sound: null, ms: 1800, next: null };   // forgives quickly
+var SULK = { text: 'hmph...', mood: 'sad', sound: 'sad', ms: 3500, next: FINE };
+function poke(c) {
+  var sleeping = isNight();
+  if (HALLOWEEN) {
+    if (c === 1) { toastNow(sleeping ? 'zzz...' : (Math.random() < 0.4 ? 'trick or treat?' : ''), sleeping ? 'sleepy' : 'pumpkin', 'pumpkin', 2000); }
+    else if (c === 2) { toastNow(sleeping ? 'zzz...' : 'BOO!', sleeping ? 'sleepy' : 'surprised', 'boo', 2200); }
+    else if (c === 3) { toastNow(sleeping ? 'Let me sleep!' : 'grr!', 'devil', 'devil', 5000, SULK); }
+    else { toastNow(sleeping ? 'LET ME SLEEP!' : 'I WILL HAUNT YOU!', 'devil', 'devil', 5000, SULK, true); }
+    return;
+  }
+  if (c === 1) {
+    toastNow(sleeping ? 'zzz...' : (Math.random() < 0.4 ? 'bip!' : ''), sleeping ? 'sleepy' : 'happy', 'happy', 1800);
+  } else if (c === 2) {
+    toastNow(sleeping ? 'zzz...' : '!?', sleeping ? 'sleepy' : 'surprised', 'surprised', 2200);
+  } else if (c === 3) {
+    toastNow(sleeping ? 'Let me sleep!' : 'hey!', 'angry', 'angry', 5000, SULK);
+  } else {
+    toastNow(sleeping ? 'LET ME SLEEP!' : 'STOP IT!', 'angry', 'angry', 5000, SULK, true);
+  }
+}
+
+// it missed you
+function joy() {
+  toastNow("you're back!", 'happy', null, 2500);
+  startAct('song', "you're back!");
+}
+
+var curKey = '';
+function setMood(m) {
+  mood = m;
+  tgt = [m.L, m.R];
+  lookTX = m.lx; lookTY = m.ly;
+}
+
+var MOOD_COLORS = HALLOWEEN
+  ? { normal: '#f90', happy: '#fa0', wink: '#f90', pumpkin: '#f80', devil: '#f22', angry: '#f33',
+      sad: '#8bf', lonely: '#8bf', surprised: '#fe3', thinking: '#c8f', sleepy: '#a60', asleep: '#546' }
+  : { normal: '#3af', happy: '#4cf', wink: '#3af', pumpkin: '#3af', devil: '#3af', angry: '#2d8ff0',
+      sad: '#6a9ad0', lonely: '#6a9ad0', surprised: '#8df', thinking: '#8ab4ff', sleepy: '#2a78b8', asleep: '#2a4a7a' };
+var ASLEEP_COLOR = HALLOWEEN ? '#546' : '#2a4a7a';
+var FURY_COLORS = HALLOWEEN ? ['#f22', '#fb0'] : ['#3af', '#d6ecff'];    // flickers between these when furious
+var curColor = '', hallGreeted = false;
+function applyColor() {
+  var n = isNight();
+  var d = clockDate();
+  var hallo = HALLOWEEN && !!d && d.getUTCMonth() === 9 && d.getUTCDate() === 31;        // 31 October
+  if (n !== colorNight) {
+    colorNight = n;
+    if (!n && serverTs) {                      // night -> day
+      lastTouch = now();
+      sleepAfter = rnd(S_MIN, S_MAX);
+      toastNow(hallo ? 'Happy Halloween!' : 'Good morning!', hallo ? 'pumpkin' : 'happy', null, 5000);
+    }
+  }
+  if (hallo && !n && !hallGreeted && serverTs) {   // the page was opened on Halloween
+    hallGreeted = true;
+    toastNow('Happy Halloween!', 'pumpkin', 'pumpkin', 6000);
+  }
+  var c = (n || stage === 4) ? ASLEEP_COLOR : (MOOD_COLORS[mood.name] || '#3af');
+  if ((mood.name === 'devil' || mood.name === 'angry') && toast && toast.shake && now() < toast.until) {   // furious: flickers
+    c = FURY_COLORS[Math.floor(now() / 150) % 2];
+  }
+  if (c !== curColor) {
+    curColor = c;
+    for (var e = 0; e < 2; e++) {
+      for (var i = 0; i < N; i++) { slices[e][i].style.background = c; }
+    }
+  }
+}
+
+function ease(c, t, k) { return c + (t - c) * k; }
+function fin(v, d) { return (v === v && v !== Infinity && v !== -Infinity) ? v : d; }   // v === v is false only for NaN
+
+function drawEye(e, blinkF) {
+  var p = cur[e];
+  var w = p.w, h = p.h * blinkF;
+  if (h < 3) { h = 3; }
+  var cx = EX[e] + lookX, cy = CY + lookY;
+  var r = Math.min(26, h / 2, w / 2);
+  var sw = w / N;
+  var left = cx - w / 2;
+  for (var i = 0; i < N; i++) {
+    var u = (i + 0.5) / N;                       // 0..1 left to right
+    var t = (e === 0) ? u : 1 - u;               // 0 outer .. 1 inner
+    var dx = Math.min(u, 1 - u) * w;
+    var inset = 0;
+    if (dx < r) { inset = r - Math.sqrt(r * r - (r - dx) * (r - dx)); }
+    var top = cy - h / 2 + inset;
+    var bot = cy + h / 2 - inset;
+    if (p.tilt > 0) { top += p.tilt * h * 0.7 * t; }
+    else if (p.tilt < 0) { top += -p.tilt * h * 0.7 * (1 - t); }
+    if (p.arch > 0.01) {
+      var bump = 1 - (2 * u - 1) * (2 * u - 1);
+      var ay = cy + h * 0.2 - h * 0.45 * bump;
+      var at = ay, ab = ay + Math.max(14, h * 0.3);
+      top = top + (at - top) * p.arch;
+      bot = bot + (ab - bot) * p.arch;
+    }
+    if (p.cup > 0.01) {                          // closed, sleeping eye: a thin "U"
+      var bump2 = 1 - (2 * u - 1) * (2 * u - 1);
+      var cyy = cy - h * 0.2 + h * 0.45 * bump2;
+      var ct = cyy, cb = cyy + Math.max(10, h * 0.28);
+      top = top + (ct - top) * p.cup;
+      bot = bot + (cb - bot) * p.cup;
+    }
+    if (p.tri > 0.01) {                          // jack-o'-lantern eye: a triangle pointing up
+      var tt = (cy + h / 2) - h * (1 - Math.abs(2 * u - 1));
+      top = top + (tt - top) * p.tri;
+    }
+    var x0 = Math.round(left + i * sw);
+    var x1 = Math.round(left + (i + 1) * sw);
+    var hh = Math.round(bot - top);
+    if (hh < 2) { hh = 2; }
+    var wd = x1 - x0 + (i < N - 1 ? 1 : 0);              // 1px overlap hides seams
+    var tp = Math.round(top);
+    var c = cache[e][i];
+    var s = slices[e][i].style;
+    var xl = FLIP ? W - x0 - wd : x0;                    // upside down: mirror both axes
+    var yt = FLIP ? H - tp - hh : tp;
+    lastVals = e + ':' + i + ' x' + xl + ' y' + yt + ' w' + wd + ' h' + hh;
+    if (c.l !== xl) { c.l = xl; s.left = xl + 'px'; }
+    if (c.w !== wd) { c.w = wd; s.width = wd + 'px'; }
+    if (c.t !== yt) { c.t = yt; s.top = yt + 'px'; }
+    if (c.h !== hh) { c.h = hh; s.height = hh + 'px'; }
+  }
+}
+
+var hornVal = 0, hornKey = '', nextTear = 0, tearStart = 0;
+function drawHorns() {
+  hornVal = ease(hornVal, (mood.name === 'devil') ? 1 : 0, 0.35);      // the horns pop up and shrink away
+  var rows = Math.round(hornVal * 5);
+  var key = rows + ',' + Math.round(lookX) + ',' + Math.round(lookY);
+  if (key === hornKey) { return; }
+  hornKey = key;
+  for (var s = 0; s < 2; s++) {
+    var dir = (s === 0) ? -1 : 1;                                        // each horn leans outward
+    var cx = EX[s] + lookX + dir * 28;
+    var baseY = CY + lookY - 46;
+    for (var r = 0; r < 5; r++) {
+      var st = horns[s][r].style;
+      if (r >= rows) { st.display = 'none'; continue; }
+      var wdt = 18 - r * 3;                                              // 18,15,12,9,6: tapering
+      st.display = 'block';
+      st.left = Math.round(cx + dir * r * 5 - wdt / 2) + 'px';
+      st.top = Math.round(baseY - r * 8) + 'px';
+      st.width = wdt + 'px';
+      st.height = '9px';
+    }
+  }
+}
+
+function updateTear(t) {                                                 // lonely: a tear rolls down now and then
+  var show = (stage === 2 || stage === 3) && !notice && !act && !(toast && t < toast.until);
+  if (show && tearStart === 0 && t >= nextTear) { tearStart = t; nextTear = t + rnd(4000, 7000); }
+  if (tearStart === 0) { return; }
+  var p = (t - tearStart) / 1500;
+  if (!show || p >= 1) { tearStart = 0; tearEl.style.display = 'none'; return; }
+  tearEl.style.display = 'block';
+  tearEl.style.left = Math.round(EX[0] + lookX - 30) + 'px';
+  tearEl.style.top = Math.round(CY + lookY + 30 + p * 70) + 'px';
+}
+
+// ---- sleeping: slow breathing, drifting z's, and now and then something random ----
+var sleepEv = null, nextSleepEv = 0, nextZ = 0;
+
+function spawnZ(delay) {
+  for (var i = 0; i < zs.length; i++) {
+    if (zs[i].born === 0) {
+      zs[i].born = now() + (delay || 0);
+      zs[i].dur = rnd(2800, 3800);
+      zs[i].x = EX[1] + 55 + rnd(0, 35);
+      zs[i].y = 84;
+      return;
+    }
+  }
+}
+
+function updateZs(t) {
+  for (var i = 0; i < zs.length; i++) {
+    var z = zs[i];
+    if (z.born === 0 || t < z.born) { continue; }
+    var p = (t - z.born) / z.dur;
+    if (p >= 1) { z.born = 0; z.el.style.display = 'none'; continue; }
+    var s = z.el.style;
+    s.display = 'block';
+    var zsz = Math.round(22 + p * 22);
+    var zx = Math.round(z.x + 12 * Math.sin(p * 5)), zy = Math.round(z.y - p * 48);
+    s.left = (FLIP ? W - zx - Math.round(zsz * 0.7) : zx) + 'px';
+    s.top = (FLIP ? H - zy - zsz : zy) + 'px';
+    s.fontSize = zsz + 'px';
+    var c = 1 - p;                                           // fade to black as it floats up
+    s.color = 'rgb(' + Math.round(130 * c) + ',' + Math.round(190 * c) + ',' + Math.round(255 * c) + ')';
+  }
+}
+
+function sleepTick(t) {
+  lookTX = mood.lx;
+  lookTY = mood.ly + 4 * Math.sin((t % 4398) / 700);   // 4398 ms = one breath; keeps sin()'s argument small                  // breathing
+  if (nextSleepEv === 0) { nextSleepEv = t + rnd(3000, 8000); nextZ = t + 800; }
+  if (sleepEv) {
+    if (t > sleepEv.until) { sleepEv = null; tgt = [mood.L, mood.R]; }
+    else if (sleepEv.name === 'dream') { lookTX = (Math.floor(t / 90) % 2) ? 4 : -4; }   // twitching
+  } else if (t >= nextSleepEv) {
+    var r = Math.random();
+    if (r < 0.34) {                                          // one eye cracks open for a peek
+      sleepEv = { name: 'peek', until: t + 1600 };
+      tgt = [{ w:100, h:64, tilt:0.4, arch:0, cup:0 }, mood.R];
+    } else if (r < 0.67) {                                   // dreaming
+      sleepEv = { name: 'dream', until: t + 1400 };
+    } else {                                                 // a big snooze: several z's at once
+      sleepEv = { name: 'snore', until: t + 1500 };
+      spawnZ(0); spawnZ(500); spawnZ(1000);
+    }
+    nextSleepEv = t + rnd(7000, 18000);
+  }
+  if (t >= nextZ) { spawnZ(0); nextZ = t + rnd(1800, 4200); }
+}
+
+// hearts replace the eyes while a 'love' / 'heart' routine runs, and beat like a pulse
+function drawHearts(t) {
+  var kind = act ? act.name : '';
+  var want = (kind === 'love' || kind === 'heart');
+  if (want !== eyesHidden) {
+    eyesHidden = want;
+    for (var e = 0; e < 2; e++) {
+      for (var i = 0; i < N; i++) { slices[e][i].style.display = want ? 'none' : 'block'; }
+    }
+  }
+  for (var h = 0; h < 2; h++) {
+    var show = want && (h === 0 || kind === 'love');
+    var key = '';
+    if (show) {
+      var el = t - act.start;
+      var base = (kind === 'love') ? 10 : 20;                              // cell size in px
+      var cell = Math.round(base * (1 + 0.14 * Math.abs(Math.sin(el / 230))));   // heartbeat
+      var cx = (kind === 'love') ? EX[h] : 240;
+      key = cell + ',' + cx;
+    }
+    if (key === heartKey[h]) { continue; }
+    heartKey[h] = key;
+    for (var k = 0; k < hearts[h].length; k++) {
+      var p = hearts[h][k], st = p.el.style;
+      if (!show) { st.display = 'none'; continue; }
+      st.display = 'block';
+      st.left = Math.round(cx - 4.5 * cell + p.a * cell) + 'px';
+      st.top = Math.round(CY - 4 * cell + p.row * cell) + 'px';
+      st.width = ((p.b - p.a + 1) * cell) + 'px';
+      st.height = cell + 'px';
+    }
+  }
+}
+
+var frameCost = 0;     // smoothed ms of work per frame (type frameCost in a console to see it)
+var lastVals = '';
+var stepErr = {};
+// run one part of the drawing on its own: if it fails (old IE is picky), report it once and carry on
+function safe(name, fn, a, b) {
+  try { fn(a, b); }
+  catch (err) {
+    stepErr[name] = (stepErr[name] || 0) + 1;
+    if (stepErr[name] <= 2) {
+      logToServer(name + ' failed: ' + (err && err.message ? err.message : err) + ' | mood=' + mood.name +
+                  ' night=' + (serverTs ? isNight() : '?') + ' look=' + lookX + ',' + lookY + ' last=' + lastVals +
+                  ' cur0=' + cur[0].w + ',' + cur[0].h + ',' + cur[0].tilt + ',' + cur[0].arch + ',' + cur[0].cup + ',' + cur[0].tri);
+    }
+  }
+}
+
+function frameWork() {
+  var t = now();
+
+  // blink (slower, sleepier at night)
+  var blinkF = 1;
+  if (t >= nextBlink && blinkStart === 0) { blinkStart = t; }
+  if (blinkStart !== 0) {
+    var p = (t - blinkStart) / 160;
+    if (p >= 1) { blinkStart = 0; nextBlink = t + rnd(2000, 5500); }
+    else { blinkF = Math.max(0.06, Math.abs(1 - 2 * p)); }
+  }
+
+  safe('applyColor', applyColor);
+  safe('updateStage', updateStage);
+  if (STANDALONE) { safe('localTick', localTick, t); }
+
+  // scripted routines take over the gaze until they finish
+  if (act) {
+    var el = t - act.start;
+    if (el >= act.dur) { act = null; curKey = ''; nextLook = t + 800; }
+    else if (act.name === 'song') {
+      lookTX = 16 * Math.sin(el / 330);
+      lookTY = -10 * Math.abs(Math.sin(Math.PI * el / 230));   // a bounce on every note
+    } else if (act.name === 'read') {                       // eyes sweep along the lines, drop to the next one
+      if (el >= 7000 && !act.peek) { act.peek = true; setMood(MOODS.happy); }          // looks at you over the paper, smiling
+      if (act.peek) { lookTX = 0; lookTY = 0; }
+      else { lookTX = 16 * Math.sin(el / 420); lookTY = -8 + 3 * Math.floor((el / 840) % 3); }
+    } else if (act.name === 'love' || act.name === 'heart') {
+      lookTX = 0; lookTY = 0;
+    } else if (act.name === 'lookaround') {
+      lookTX = 34 * Math.sin(el / 420); lookTY = 6 * Math.sin(el / 260);
+    } else {
+      lookTX = (Math.floor(el / 60) % 2) ? 8 : -8;
+      lookTY = 0;
+    }
+  } else {
+    // pick the face for the current situation
+    var w = wanted();
+    var key = w.mood.name + '|' + w.text;
+    if (key !== curKey) {
+      curKey = key;
+      setMood(w.mood);
+      setText(noteEl, w.text);
+    }
+    if (mood.name === 'asleep' && !dragging) {              // dozing: breathing, z's, random dreams
+      safe('sleepTick', sleepTick, t);
+    } else if (toast && toast.shake && t < toast.until) {   // furious: trembling
+      lookTX = (Math.floor(t / 60) % 2) ? 7 : -7;
+    } else if (!dragging && t >= nextLook) {                // wandering gaze (only when nobody is touching it)
+      nextLook = t + rnd(1200, 3500);
+      lookTX = mood.lx + rnd(-18, 18);
+      lookTY = mood.ly + rnd(-8, 8);
+    }
+  }
+
+  // ease towards targets
+  for (var e = 0; e < 2; e++) {
+    cur[e].w = ease(cur[e].w, tgt[e].w, 0.42);
+    cur[e].h = ease(cur[e].h, tgt[e].h, 0.42);
+    cur[e].tilt = ease(cur[e].tilt, tgt[e].tilt, 0.42);
+    cur[e].arch = ease(cur[e].arch, tgt[e].arch, 0.42);
+    cur[e].cup = ease(cur[e].cup, tgt[e].cup || 0, 0.42);
+    cur[e].tri = ease(cur[e].tri, tgt[e].tri || 0, 0.42);
+  }
+  lookTX = fin(lookTX, 0); lookTY = fin(lookTY, 0);        // old IE throws on NaN sizes: never let one through
+  lookX = fin(ease(lookX, lookTX, 0.35), 0);
+  lookY = fin(ease(lookY, lookTY, 0.35), 0);
+
+  safe('drawEye0', drawEye, 0, blinkF);
+  safe('drawEye1', drawEye, 1, (mood.name === 'wink' && blinkF < 1) ? blinkF : (mood.name === 'wink' ? 1 : blinkF));
+
+  safe('drawHearts', drawHearts, t);
+  safe('drawBook', drawBook, t);
+  safe('drawClock', drawClock);
+  safe('updateZs', updateZs, t);
+  safe('drawHorns', drawHorns);
+  safe('updateTear', updateTear, t);
+  if (labelUntil && t > labelUntil) { setText(labelEl, ''); labelUntil = 0; }
+}
+
+var frameErrors = 0, framesOk = 0;
+function frame() {
+  var t0 = now();
+  try {
+    frameWork();
+    if (framesOk++ === 0) { logToServer('first frame ok'); }
+  } catch (err) {
+    if (frameErrors++ < 5) { logToServer('frame error: ' + (err && err.message ? err.message : err) + (err && err.number ? ' #' + err.number : '')); }
+  }
+  var spent = now() - t0;
+  frameCost = frameCost * 0.9 + spent * 0.1;
+  setTimeout(frame, Math.max(20, FRAME_MS - spent));
+}
+
+// ---------------------------------------------------------------- input (mouse events fire from the resistive touchscreen too)
+function pos(ev) {
+  ev = ev || window.event;
+  var x = ev.clientX - ox, y = ev.clientY - oy;
+  if (FLIP) { x = W - x; y = H - y; }
+  return { x: x, y: y };
+}
+var ox = 0, oy = 0, downAt = 0, downX = 0, downY = 0, moved = false, lastUp = 0;
+var MOVE_PX = 16;      // a resistive screen jitters under a finger: only a real slide counts as a drag
+var HOLD_MS = 800;     // press-and-hold = tickle
+var DEBUG = (window.location.search.indexOf('debug') >= 0);   // ?debug shows the last touch on screen
+function dbg(s) { if (DEBUG) { setText(labelEl, s); labelUntil = 0; } }
+
+function touchStart(q) {
+  dragging = true; moved = false; downAt = now(); downX = q.x; downY = q.y;
+  welcomeBack = (stage >= 2);                        // was it lonely before this touch?
+  lastTouch = now();
+  sleepAfter = rnd(S_MIN, S_MAX);                    // next time it is left alone, a new random bedtime
+  lookTX = (q.x - W / 2) / (W / 2) * 30;
+  lookTY = (q.y - H / 2) / (H / 2) * 18;
+  dbg('down ' + q.x + ',' + q.y);
+}
+
+function touchMove(q) {
+  if (Math.abs(q.x - downX) > MOVE_PX || Math.abs(q.y - downY) > MOVE_PX) { moved = true; }
+  lookTX = (q.x - W / 2) / (W / 2) * 30;
+  lookTY = (q.y - H / 2) / (H / 2) * 18;
+}
+
+function touchEnd() {
+  dragging = false;
+  var held = now() - downAt;
+  dbg('up held=' + held + ' moved=' + moved);
+  if (moved) {                                           // dragging a while = petting
+    lookTX = mood.lx; lookTY = mood.ly;
+    if (held > 1200) {
+      if (welcomeBack) { joy(); } else { toastNow('', 'happy', 'happy', 2500); }
+    }
+    return;
+  }
+  lookTX = mood.lx; lookTY = mood.ly;
+  if (downX < 70 && downY < 50) {                        // top-left corner = mute / unmute
+    soundOn = !soundOn;
+    setText(labelEl, soundOn ? 'sound on' : 'sound off');
+    labelUntil = now() + 1500;
+    playSound('boop', true);
+    return;
+  }
+  if (notice) {                                          // tap = "got it" for a notice
+    sendAck(notice.id);
+    dismissed = notice.id + '|' + notice.text; dismissedAt = now();
+    notice = null; shownId = null;
+    playSound('boop', true);
+    toastNow('on it!', 'happy', null, 1500);              // proud to have delivered the message
+    return;
+  }
+  if (welcomeBack) { joy(); return; }                         // it missed you
+  if (held > HOLD_MS) { startAct('giggle', 'hehehe'); return; }
+  var t = now();
+  if (t - lastTap > 4000) { tapCount = 0; }                   // slow taps don't add up (touchscreen is slow)
+  tapCount++; lastTap = t;
+  poke(tapCount);
+  dbg('tap #' + tapCount);
+}
+
+document.onmousedown = function (ev) { touchStart(pos(ev)); return false; };
+document.onmousemove = function (ev) { if (dragging) { touchMove(pos(ev)); } };
+document.onmouseup = function () { lastUp = now(); if (dragging) { touchEnd(); } };
+// some touch drivers send only a click: treat a click that wasn't part of a press as a tap
+document.onclick = function (ev) {
+  if (now() - lastUp < 600) { return; }
+  lastUp = now();
+  touchStart(pos(ev));
+  touchEnd();
+};
+
+// centre the 480x272 "panel" when previewed on a bigger desktop window
+function place() {
+  var vw = document.documentElement.clientWidth || W;
+  var vh = document.documentElement.clientHeight || H;
+  var onPanel = ONPANEL;   // pin to top-left on the real device
+  ox = (!onPanel && vw > W) ? Math.floor((vw - W) / 2) : 0;
+  oy = (!onPanel && vh > H) ? Math.floor((vh - H) / 2) : 0;
+  screenEl.style.left = ox + 'px';
+  screenEl.style.top = oy + 'px';
+}
+window.onresize = place;
+place();
+
+// place the text boxes for the current orientation (called at start, and if the server later says flip)
+function layoutFlip() {
+  if (FLIP) {
+    clockEl.style.right = 'auto'; clockEl.style.top = 'auto';
+    clockEl.style.left = '10px'; clockEl.style.bottom = '6px';
+    labelEl.style.top = 'auto'; labelEl.style.bottom = '6px';
+    noteEl.style.top = (H - 208 - 50) + 'px';
+  } else {
+    clockEl.style.left = 'auto'; clockEl.style.bottom = 'auto';
+    clockEl.style.right = '10px'; clockEl.style.top = '6px';
+    labelEl.style.bottom = 'auto'; labelEl.style.top = '6px';
+    noteEl.style.top = '208px';
+  }
+  if (ROTPROP) {
+    var rot = FLIP ? 'rotate(180deg)' : '';
+    clockEl.style[ROTPROP] = rot; labelEl.style[ROTPROP] = rot; noteEl.style[ROTPROP] = rot;
+  }
+  clockEl.style.textAlign = (FLIP && !ROTPROP) ? 'left' : '';
+  for (var e = 0; e < 2; e++) {                       // force every eye slice to be re-placed
+    for (var i = 0; i < N; i++) { cache[e][i].l = -9999; cache[e][i].t = -9999; }
+  }
+  lastClock = ''; curKey = '';                        // redraw the text in the right orientation
+}
+layoutFlip();
+
+var RELOAD_MS = 10 * 60 * 1000;   // reload the page every 10 minutes; later change to 60 * 60 * 1000 for every hour
+function reloadNow() {
+  if (dragging) { setTimeout(reloadNow, 5000); return; }          // never reload under someone's finger
+  try { window.name = 'bit:' + lastTouch + ':' + napUntil; } catch (err) { }
+  window.location.replace(window.location.pathname + '?r=' + now() + window.location.hash);
+}
+if (!STANDALONE) { setTimeout(reloadNow, RELOAD_MS); }
+
+logToServer('init done');
+if (STANDALONE) { syncLocal(); }
+poll();
+frame();
+</script>
+</body>
+</html>

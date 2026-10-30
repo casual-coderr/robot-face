@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bit reminders</title>
+<style>
+  :root {
+    --bg: #0a1220; --card: #111c30; --line: #223250; --text: #e8f1ff; --dim: #8aa0c4;
+    --blue: #3af; --blue-ink: #04223a; --bad: #ff7a7a; --ok: #6fe0a0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 20px 16px 60px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h1 span { color: var(--blue); }
+  .sub { color: var(--dim); margin: 0 0 18px; font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 18px; }
+  label { display: block; font-size: 13px; color: var(--dim); margin: 12px 0 4px; }
+  label:first-child { margin-top: 0; }
+  input[type=text], input[type=time], input[type=date], input[type=number], select {
+    width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: #0d1626; color: var(--text); font: inherit;
+  }
+  input:focus, select:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { position: relative; }
+  .chip input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+  .chip span { display: block; padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: #0d1626; font-size: 14px; user-select: none; }
+  .chip input:checked + span { background: var(--blue); color: var(--blue-ink); border-color: var(--blue); font-weight: 600; }
+  .chip input:focus-visible + span { outline: 2px solid var(--text); outline-offset: 2px; }
+  .check { display: flex; align-items: center; gap: 10px; margin-top: 14px; color: var(--text); font-size: 15px; }
+  .check input { width: 20px; height: 20px; accent-color: var(--blue); }
+  button { font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--line); background: #0d1626; color: var(--text); padding: 8px 12px; }
+  button:hover { border-color: var(--blue); }
+  button.primary { width: 100%; margin-top: 16px; padding: 12px; background: var(--blue); color: var(--blue-ink); border-color: var(--blue); font-weight: 700; }
+  button.primary:disabled { opacity: .6; cursor: default; }
+  button.danger:hover { border-color: var(--bad); color: var(--bad); }
+  #msg, .msg { min-height: 20px; margin-top: 10px; font-size: 14px; }
+  #msg.err, .msg.err { color: var(--bad); } #msg.ok, .msg.ok { color: var(--ok); }
+  h2 { font-size: 16px; margin: 0 0 10px; }
+  .item { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+  .item:first-child { border-top: 0; }
+  .time { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; grid-row: span 2; align-self: center; }
+  .item.off .time, .item.off .what { opacity: .45; }
+  .what { word-break: break-word; }
+  .meta { color: var(--dim); font-size: 13px; }
+  .actions { grid-column: 2; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+  .actions button { padding: 6px 10px; font-size: 14px; }
+  .empty { color: var(--dim); padding: 8px 0; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1><span>Bit</span> reminders</h1>
+  <p class="sub">Bit tells you on the panel at the time you pick, with a sound, until you tap the screen. <a href="/commands" style="color: var(--blue)">Commands</a></p>
+
+  <form class="card" id="quick" autocomplete="off">
+    <h2>Quick reminder</h2>
+    <label for="qtext">A one-off thing, like &ldquo;get groceries&rdquo;</label>
+    <input type="text" id="qtext" maxlength="80" placeholder="Get groceries" required>
+    <label>Remind me</label>
+    <div class="chips" id="qwhen"></div>
+    <div id="qtimeBox" class="hidden" style="margin-top: 10px"><input type="time" id="qtime"></div>
+    <button class="primary" id="qadd" type="submit">Remind me</button>
+    <div id="qmsg" class="msg" role="status"></div>
+  </form>
+
+  <form class="card" id="form" autocomplete="off">
+    <h2>Scheduled reminder</h2>
+    <div class="row">
+      <div>
+        <label for="time">Time</label>
+        <input type="time" id="time" required>
+      </div>
+      <div style="flex: 2">
+        <label for="text">What should Bit say?</label>
+        <input type="text" id="text" maxlength="80" placeholder="Start dinner prep" required>
+      </div>
+    </div>
+
+    <label>Repeat</label>
+    <select id="repeat">
+      <option value="daily">Every day</option>
+      <option value="days">Only on some days</option>
+      <option value="once">Once, on a date</option>
+    </select>
+    <div id="daysBox" class="chips hidden" style="margin-top: 10px"></div>
+    <div id="dateBox" class="hidden" style="margin-top: 10px"><input type="date" id="date"></div>
+
+    <div class="row">
+      <div>
+        <label for="mood">Bit's face</label>
+        <select id="mood">
+          <option value="surprised">Surprised</option>
+          <option value="happy">Happy</option>
+          <option value="thinking">Thinking</option>
+          <option value="normal">Normal</option>
+          <option value="wink">Wink</option>
+          <option value="angry">Angry</option>
+          <option value="sad">Sad</option>
+          <option value="sleepy">Sleepy</option>
+        </select>
+      </div>
+      <div>
+        <label for="sound">Sound</label>
+        <select id="sound"></select>
+      </div>
+    </div>
+
+    <label class="check"><input type="checkbox" id="sticky" checked> Stay until I tap the screen</label>
+    <div id="secBox" class="hidden">
+      <label for="seconds">Disappear after (seconds)</label>
+      <input type="number" id="seconds" min="5" max="3600" value="60">
+    </div>
+
+    <button class="primary" id="add" type="submit">Add reminder</button>
+    <div id="msg" role="status"></div>
+  </form>
+
+  <section class="card">
+    <h2>Your reminders</h2>
+    <div id="list"></div>
+  </section>
+</main>
+
+<script>
+const DAYS = [["mon","Mon"],["tue","Tue"],["wed","Wed"],["thu","Thu"],["fri","Fri"],["sat","Sat"],["sun","Sun"]];
+const $ = id => document.getElementById(id);
+
+// day chips
+for (const [key, label] of DAYS) {
+  const chip = document.createElement("label");
+  chip.className = "chip";
+  const box = document.createElement("input");
+  box.type = "checkbox"; box.value = key; box.checked = ["mon","tue","wed","thu","fri"].includes(key);
+  const span = document.createElement("span");
+  span.textContent = label;
+  chip.append(box, span);
+  $("daysBox").append(chip);
+}
+
+function showMsg(text, kind, id) { const m = $(id || "msg"); m.textContent = text; m.className = (id ? "msg " : "") + (kind || ""); }
+
+// quick reminder: when to remind
+const WHEN = [["now","Right now"],["15","In 15 min"],["30","In 30 min"],["60","In 1 hour"],["120","In 2 hours"],["at","At a time\u2026"]];
+for (const [value, label] of WHEN) {
+  const chip = document.createElement("label");
+  chip.className = "chip";
+  const r = document.createElement("input");
+  r.type = "radio"; r.name = "qwhen"; r.value = value; r.checked = value === "30";
+  const span = document.createElement("span");
+  span.textContent = label;
+  chip.append(r, span);
+  $("qwhen").append(chip);
+}
+$("qwhen").addEventListener("change", () => {
+  $("qtimeBox").classList.toggle("hidden", document.querySelector("input[name=qwhen]:checked").value !== "at");
+});
+
+function syncForm() {
+  $("daysBox").classList.toggle("hidden", $("repeat").value !== "days");
+  $("dateBox").classList.toggle("hidden", $("repeat").value !== "once");
+  $("secBox").classList.toggle("hidden", $("sticky").checked);
+}
+$("repeat").addEventListener("change", syncForm);
+$("sticky").addEventListener("change", syncForm);
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) throw new Error(data.error || "Something went wrong (" + res.status + ")");
+  return data;
+}
+
+function repeatText(r, serverNow) {
+  if (r.at) {                                   // quick one-off: say how long is left
+    const mins = Math.max(0, Math.round((r.at - serverNow) / 60));
+    return "One-off, " + (mins < 60 ? "in " + mins + " min" : "in " + (Math.round(mins / 6) / 10) + " h");
+  }
+  if (r.date) return "Once on " + r.date;
+  if (r.days === "daily") return "Every day";
+  return r.days.map(d => d[0].toUpperCase() + d.slice(1)).join(", ");
+}
+
+function render(items, serverNow) {
+  const list = $("list");
+  list.replaceChildren();
+  if (!items.length) {
+    const e = document.createElement("div");
+    e.className = "empty"; e.textContent = "No reminders yet. Add one above.";
+    list.append(e);
+    return;
+  }
+  items.sort((a, b) => (a.at && b.at) ? a.at - b.at : a.at ? -1 : b.at ? 1 : a.time.localeCompare(b.time));
+  for (const r of items) {
+    const row = document.createElement("div");
+    row.className = "item" + (r.enabled === false ? " off" : "");
+
+    const t = document.createElement("div"); t.className = "time"; t.textContent = r.time;
+    const body = document.createElement("div");
+    const what = document.createElement("div"); what.className = "what"; what.textContent = r.text;
+    const meta = document.createElement("div"); meta.className = "meta";
+    meta.textContent = repeatText(r, serverNow) + " · " + r.mood + (r.sticky === false ? " · " + r.seconds + " s" : " · until tapped");
+    body.append(what, meta);
+
+    const actions = document.createElement("div"); actions.className = "actions";
+    const toggle = document.createElement("button");
+    toggle.textContent = r.enabled === false ? "Turn on" : "Turn off";
+    toggle.onclick = () => act("/api/reminders/toggle?id=" + encodeURIComponent(r.id));
+    const test = document.createElement("button");
+    test.textContent = "Test on panel";
+    test.onclick = () => testNow(r);
+    const del = document.createElement("button");
+    del.className = "danger"; del.textContent = "Delete";
+    del.onclick = () => { if (confirm("Delete this reminder?\n" + r.time + "  " + r.text)) act("/api/reminders/delete?id=" + encodeURIComponent(r.id)); };
+    actions.append(toggle, test, del);
+
+    row.append(t, body, actions);
+    list.append(row);
+  }
+}
+
+async function load() {
+  try {
+    const data = await api("/api/reminders");
+    const sel = $("sound");
+    if (!sel.options.length) {
+      for (const s of data.sounds) { const o = document.createElement("option"); o.value = s; o.textContent = s; sel.append(o); }
+      sel.value = data.sounds.includes("alert") ? "alert" : data.sounds[0];
+    }
+    render(data.reminders, data.now);
+  } catch (e) { showMsg(e.message, "err"); }
+}
+
+async function act(path) {
+  try { await api(path, { method: "POST" }); showMsg("", ""); await load(); }
+  catch (e) { showMsg(e.message, "err"); }
+}
+
+async function testNow(r) {
+  const q = new URLSearchParams({ text: r.text, mood: r.mood, sound: r.sound, sticky: r.sticky === false ? "0" : "1", seconds: r.seconds || 60 });
+  try { await api("/api/notify?" + q); showMsg("Sent to the panel. Tap the screen to dismiss it.", "ok"); }
+  catch (e) { showMsg(e.message, "err"); }
+}
+
+$("form").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const body = {
+    time: $("time").value, text: $("text").value, mood: $("mood").value, sound: $("sound").value,
+    sticky: $("sticky").checked, seconds: Number($("seconds").value) || 60, days: "daily"
+  };
+  const rep = $("repeat").value;
+  if (rep === "days") {
+    body.days = [...$("daysBox").querySelectorAll("input:checked")].map(i => i.value);
+    if (!body.days.length) { showMsg("Pick at least one day.", "err"); return; }
+  } else if (rep === "once") {
+    if (!$("date").value) { showMsg("Pick a date.", "err"); return; }
+    body.date = $("date").value;
+  }
+  $("add").disabled = true;
+  try {
+    await api("/api/reminders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    showMsg("Added. Bit will remind you at " + body.time + ".", "ok");
+    $("text").value = "";
+    await load();
+  } catch (e) { showMsg(e.message, "err"); }
+  $("add").disabled = false;
+});
+
+$("quick").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const when = document.querySelector("input[name=qwhen]:checked").value;
+  const body = { text: $("qtext").value };
+  if (when === "now") body.mode = "now";
+  else if (when === "at") {
+    if (!$("qtime").value) { showMsg("Pick a time.", "err", "qmsg"); return; }
+    body.mode = "at"; body.time = $("qtime").value;
+  } else { body.mode = "in"; body.minutes = Number(when); }
+  $("qadd").disabled = true;
+  try {
+    const res = await api("/api/quick", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    showMsg(res.now ? "On the panel now. Tap the screen to dismiss it." : "Bit will remind you at " + res.time + ".", "ok", "qmsg");
+    $("qtext").value = "";
+    await load();
+  } catch (e) { showMsg(e.message, "err", "qmsg"); }
+  $("qadd").disabled = false;
+});
+
+syncForm();
+load();
+setInterval(load, 30000);                       // keeps the "in N min" countdowns fresh
+</script>
+</body>
+</html>
