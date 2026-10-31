@@ -48,14 +48,14 @@ function weatherTextBox(x, y, font, color) {
 function prepareWeather(t) {
   var d = weatherData;
   var elapsed = t - weatherAt;
-  var busy = notice || connLost || act || dragging || (toast && t < toast.until) || (napUntil && t < napUntil);
-  morningShowing = !STANDALONE && !!d && d.greeting && elapsed < d.greeting_remaining * 1000 && !busy;
+  var busy = notice || connLost || act || dragging || (toast && t < toast.until && (!HALLOWEEN || toast.text)) || (napUntil && t < napUntil);
+  morningShowing = !HALLOWEEN && !STANDALONE && !!d && d.greeting && elapsed < d.greeting_remaining * 1000 && !busy;
   weatherShowing = !STANDALONE && !!d && d.enabled && elapsed < d.window_remaining * 1000 && !busy;
   var usable = weatherShowing && (d.status === 'ok' || d.status === 'cached') && elapsed < d.valid_for * 1000;
   weatherPhase = (t - weatherChangedAt) % 60000;
   morningRoutine = morningShowing && weatherPhase < 8000;
   // Raise the prop for 12 seconds each minute; readings remain during idle time.
-  weatherRoutine = usable && (d.kind === 'rain' || d.kind === 'snow' || d.kind === 'cold') && weatherPhase < 12000;
+  weatherRoutine = !HALLOWEEN && usable && (d.kind === 'rain' || d.kind === 'snow' || d.kind === 'cold') && weatherPhase < 12000;
   weatherEyeInset = ease(weatherEyeInset, weatherRoutine ? 50 : morningRoutine ? 20 : 0, 0.3);
   morningEyeShift = ease(morningEyeShift, morningRoutine ? -25 : 0, 0.3);
 }
@@ -139,12 +139,13 @@ function morningGloveShape(points, angle, color, scale) {
 
 function drawWeather(t) {
   var d = weatherData;
+  weatherStrip.style.background = HALLOWEEN ? '#000' : '#061525';
   weatherStrip.style.display = weatherShowing ? 'block' : 'none';
   if (weatherShowing) {
     weatherStrip.style.left = '0px'; weatherStrip.style.top = FLIP ? '0px' : '218px';
     if (ROTPROP) { weatherStrip.style[ROTPROP] = FLIP ? 'rotate(180deg)' : ''; }
     var usable = (d.status === 'ok' || d.status === 'cached') && t - weatherAt < d.valid_for * 1000;
-    var reading = usable ? Math.round(d.temperature) + '\u00b0C / ' + (d.summary || d.condition) :
+    var reading = usable ? Math.round(d.temperature) + '\u00b0C / ' + (HALLOWEEN ? d.condition : (d.summary || d.condition)) :
                   d.status === 'loading' ? 'Getting Copenhagen weather...' : 'Weather unavailable';
     var advice = usable ? d.advice : 'Trying again next hour';
     if (usable && d.status === 'cached') { advice = 'Cached / ' + d.advice; }

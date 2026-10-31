@@ -1,6 +1,15 @@
 Bit's Copenhagen morning
 =======================
 
+Choose **Halloween** under **Mode** on `/commands` for friendly red eyes, small
+horns and a weather strip throughout the day. Taps smile or wink, silently.
+Weather refreshes once per hour; weather props pause so the face stays visible.
+Choose **Normal** to restore blue eyes and the usual 08:00–11:00 weather window.
+Normal is the default. The selection is saved in `face-mode.json` and survives
+server and panel restarts; it does not switch automatically on a date.
+Explicit naps and reminders still take priority. The offline microSD version
+defaults to normal, has no live weather, and accepts `#halloween` for a preview.
+
 Run `python server.py` as usual. Restart an existing server after updating these
 files. The connected panel receives the new behavior through `/api/state` (JSON
 or the existing JSONP transport). No API key or new Python packages are needed.

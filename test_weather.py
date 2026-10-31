@@ -1,6 +1,8 @@
 import datetime as dt
 import functools
 import json
+import os
+import tempfile
 import threading
 import unittest
 import urllib.request
@@ -50,7 +52,7 @@ class WeatherTests(unittest.TestCase):
     def test_only_one_attempt_per_morning_hour(self):
         for hour in range(24):
             for minute in (0, 15, 30, 59):
-                self.now = stamp("2026-10-31T%02d:%02d:00+01:00" % (hour, minute))
+                self.now = stamp("2026-10-30T%02d:%02d:00+01:00" % (hour, minute))
                 self.weather.refresh_if_due()
         self.assertEqual([copenhagen_time(t).hour for t in self.calls], [8, 9, 10])
 
@@ -83,10 +85,60 @@ class WeatherTests(unittest.TestCase):
         for time, greeting, enabled in [("05:59:59", False, False), ("06:00:00", True, False),
                                         ("07:59:59", True, False), ("08:00:00", False, True),
                                         ("10:59:59", False, True), ("11:00:00", False, False)]:
-            self.now = stamp("2026-10-31T%s+01:00" % time)
+            self.now = stamp("2026-10-30T%s+01:00" % time)
             state = self.weather.state()
             self.assertEqual((state["greeting"], state["enabled"]), (greeting, enabled))
         self.assertEqual(self.calls, [])  # Reading state never calls the upstream API.
+
+    def test_halloween_mode_weather_and_return_to_normal(self):
+        self.weather.mode = lambda: "halloween"
+        for hour in (11, 18, 21, 23):
+            self.now = stamp("2026-10-31T%02d:30:00+01:00" % hour)
+            self.weather.refresh_if_due()
+            self.weather.refresh_if_due()
+            state = self.weather.state()
+            self.assertTrue(state["halloween"])
+            self.assertTrue(state["enabled"])
+            self.assertEqual(state["status"], "ok")
+            self.assertEqual(state["window_remaining"], (23 - hour) * 3600 + 1800)
+        self.assertEqual(len(self.calls), 4)
+        self.now = stamp("2026-11-01T00:00:00+01:00")
+        self.assertTrue(self.weather.state()["halloween"], "Selected mode survives midnight")
+        self.weather.mode = lambda: "normal"
+        state = self.weather.state()
+        self.assertFalse(state["halloween"])
+        self.assertFalse(state["enabled"])
+        self.weather.refresh_if_due()
+        self.assertEqual(len(self.calls), 4)
+        self.now = stamp("2026-10-31T20:00:00+01:00")
+        self.assertFalse(self.weather.state()["halloween"], "Date cannot enable Halloween")
+
+    def test_mode_commands_save_selection_and_api_state(self):
+        original_path, original_weather = server.MODE_PATH, server.weather
+        with tempfile.TemporaryDirectory() as folder:
+            server.MODE_PATH = os.path.join(folder, "face-mode.json")
+            server.weather = self.weather
+            self.weather.mode = server.face_mode
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(server.Handler, directory=server.ROOT))
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = "http://127.0.0.1:%s" % httpd.server_port
+                self.assertEqual(server.face_mode(), "normal")
+                for mode in ("halloween", "normal"):
+                    with urllib.request.urlopen(base + "/api/command?name=" + mode) as response:
+                        self.assertEqual(json.load(response), {"ok": True, "mode": mode})
+                    with open(server.MODE_PATH, encoding="utf-8") as f:
+                        self.assertEqual(json.load(f)["mode"], mode)
+                    with urllib.request.urlopen(base + "/api/state") as response:
+                        state = json.load(response)
+                    self.assertEqual(state["mode"], mode)
+                    self.assertEqual(state["weather"]["halloween"], mode == "halloween")
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join()
+                server.MODE_PATH, server.weather = original_path, original_weather
 
     def test_copenhagen_dst_independent_of_host(self):
         cases = [("2026-03-29T00:59:59+00:00", 1, 1), ("2026-03-29T01:00:00+00:00", 3, 2),

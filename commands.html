@@ -28,6 +28,7 @@
   .cmd:active { transform: scale(.97); }
   .cmd.love:hover { border-color: var(--pink); }
   .cmd.busy { border-color: var(--ok); }
+  .cmd[aria-pressed=true] { border-color: var(--blue); background: #172d46; }
   label { display: block; font-size: 13px; color: var(--dim); margin: 12px 0 4px; }
   label:first-of-type { margin-top: 0; }
   input[type=text], select { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: #0d1626; color: var(--text); font: inherit; }
@@ -42,8 +43,14 @@
 <body>
 <main>
   <h1><span>Bit</span> commands</h1>
-  <p class="sub">Tap a button and Bit does it on the panel, then goes back to normal. It can take up to 3 seconds to reach the panel. <a href="/reminders">Reminders</a></p>
+  <p class="sub">Tap a button and Bit does it on the panel, then goes back to the selected mode. It can take up to 3 seconds to reach the panel. <a href="/reminders">Reminders</a></p>
   <div id="msg" role="status"></div>
+
+  <section class="card">
+    <h2>Mode</h2>
+    <p class="sub">Stays selected until you change it.</p>
+    <div class="grid" id="modes"></div>
+  </section>
 
   <section class="card">
     <h2>Feelings</h2>
@@ -90,6 +97,10 @@
   </form>
 </main>
 <script>
+  var MODES = [
+    ['normal', '\u{1F916}', 'Normal', 'blue eyes, usual routine'],
+    ['halloween', '\u{1F608}', 'Halloween', 'playful red eyes, horns & weather']
+  ];
   var FEELINGS = [
     ['happy', '\u{1F604}', 'Happy', 'yay!'],
     ['wink', '\u{1F609}', 'Wink', 'one eye'],
@@ -125,7 +136,10 @@
     var url = '/api/command?name=' + encodeURIComponent(name) + (extra || '');
     if (btn) { btn.classList.add('busy'); setTimeout(function () { btn.classList.remove('busy'); }, 1500); }
     fetch(url).then(function (r) { return r.json(); }).then(function (j) {
-      if (j.ok) { say('Sent: ' + label + '. Bit will do it in a moment.'); }
+      if (j.ok) {
+        if (j.mode) { showMode(j.mode); say(label + ' mode selected.'); }
+        else { say('Sent: ' + label + '. Bit will do it in a moment.'); }
+      }
       else { say('Bit did not understand that one.', true); }
     }).catch(function () { say('Could not reach the server.', true); });
   }
@@ -135,6 +149,9 @@
       var b = document.createElement('button');
       b.type = 'button';
       b.className = 'cmd' + (c[4] ? ' ' + c[4] : '');
+      if (c[0] === 'normal' || c[0] === 'halloween') {
+        b.setAttribute('data-mode', c[0]); b.setAttribute('aria-pressed', 'false');
+      }
       var ico = document.createElement('span'); ico.className = 'ico'; ico.textContent = c[1];
       var name = document.createElement('b'); name.textContent = c[2];
       var hint = document.createElement('small'); hint.textContent = c[3];
@@ -143,6 +160,13 @@
       host.appendChild(b);
     });
   }
+  function showMode(mode) {
+    document.querySelectorAll('[data-mode]').forEach(function (b) {
+      b.setAttribute('aria-pressed', b.getAttribute('data-mode') === mode ? 'true' : 'false');
+    });
+  }
+  build(MODES, document.getElementById('modes'));
+  fetch('/api/state').then(function (r) { return r.json(); }).then(function (s) { showMode(s.mode || 'normal'); });
   build(FEELINGS, document.getElementById('feelings'));
   build(TRICKS, document.getElementById('tricks'));
 

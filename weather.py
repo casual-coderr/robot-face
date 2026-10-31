@@ -1,7 +1,8 @@
 """Copenhagen morning weather, fetched server-side from Open-Meteo.
 
-One attempt per Copenhagen hour, only from 08:00 (inclusive) to 11:00
-(exclusive). No dependencies; works with the server's Python 3.7+ baseline.
+One attempt per Copenhagen hour, normally from 08:00 to 11:00.
+The optional Halloween mode keeps weather available throughout the day.
+No dependencies; works with the server's Python 3.7+ baseline.
 """
 import datetime as dt
 import json
@@ -176,9 +177,10 @@ def fetch_forecast():
 
 
 class MorningWeather:
-    def __init__(self, fetch=fetch_forecast, clock=time.time):
+    def __init__(self, fetch=fetch_forecast, clock=time.time, mode=lambda: "normal"):
         self.fetch = fetch
         self.clock = clock
+        self.mode = mode
         self.lock = threading.Lock()
         self.cached = None
         self.attempted_hour = None
@@ -187,7 +189,7 @@ class MorningWeather:
     def refresh_if_due(self):
         timestamp = self.clock()
         local = copenhagen_time(timestamp)
-        if not 8 <= local.hour < 11:
+        if not (8 <= local.hour < 11 or self.mode() == "halloween"):
             return
         hour_key = local.strftime("%Y-%m-%dT%H")
         with self.lock:
@@ -209,12 +211,14 @@ class MorningWeather:
     def state(self):
         timestamp = self.clock()
         local = copenhagen_time(timestamp)
-        enabled = 8 <= local.hour < 11
-        end = local.replace(hour=11, minute=0, second=0, microsecond=0)
+        halloween = self.mode() == "halloween"
+        enabled = 8 <= local.hour < 11 or halloween
+        end = (local + dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0) if halloween else local.replace(hour=11, minute=0, second=0, microsecond=0)
         greeting_end = local.replace(hour=8, minute=0, second=0, microsecond=0)
         result = {"enabled": enabled, "location": "Copenhagen, Denmark",
                   "source": "Open-Meteo", "source_url": "https://open-meteo.com/",
-                  "timezone": "Europe/Copenhagen", "window": [8, 11],
+                  "timezone": "Europe/Copenhagen", "window": [0, 24] if halloween else [8, 11],
+                  "halloween": halloween,
                   "window_remaining": max(0, int(end.timestamp() - timestamp)) if enabled else 0,
                   "greeting": 6 <= local.hour < 8,
                   "greeting_remaining": max(0, int(greeting_end.timestamp() - timestamp)) if 6 <= local.hour < 8 else 0,

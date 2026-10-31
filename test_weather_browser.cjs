@@ -13,10 +13,12 @@ const weather = (overrides = {}) => ({
 });
 let state = { ts: Date.UTC(2026, 9, 31, 6, 30) / 1000, night: [21, 7],
   notice: null, sound: 'all', weather: weather({ enabled: false, greeting: true, greeting_remaining: 5400 }) };
+let autoPoll = true;
 const app = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/api/state') {
     res.setHeader('Content-Type', 'application/javascript');
+    if (!autoPoll) return res.end('lastOk = now();'); // Manual fixtures control expiry without polling races.
     return res.end('onState(' + JSON.stringify(state) + ');');
   }
   if (url.pathname.startsWith('/api/')) return res.end(';');
@@ -49,6 +51,7 @@ const app = http.createServer((req, res) => {
     const positions = () => page.evaluate(() => weatherPixels.map(p => p.el.style.left + ',' + p.el.style.top).join('|'));
     await page.goto('http://127.0.0.1:' + app.address().port);
     await page.waitForFunction(() => morningRoutine && document.getElementById('note').textContent === 'Good morning!');
+    autoPoll = false;
     await page.waitForTimeout(1000);
     await screenshot('morning');
     let before = await positions();
@@ -136,6 +139,37 @@ const app = http.createServer((req, res) => {
     await page.waitForTimeout(200);
     assert.equal(await page.evaluate(() => weatherStrip.style.top), '0px');
     assert.equal(await page.evaluate(() => weatherStrip.style.transform), 'rotate(180deg)');
+    // Selected Halloween mode keeps friendly red eyes and small horns beside the weather.
+    state.ts = Date.UTC(2026, 9, 31, 22, 30) / 1000;
+    await page.evaluate(() => { FLIP = false; layoutFlip(); });
+    state.mode = 'halloween';
+    await inject(weather({ halloween: true, condition: 'Cloudy' }));
+    await page.waitForTimeout(1200);
+    assert.equal(await page.evaluate(() => HALLOWEEN && weatherShowing && !weatherRoutine), true);
+    assert.equal(await page.evaluate(() => mood.name), 'devil');
+    assert.equal(await page.evaluate(() => curColor), '#f44');
+    assert.equal(await page.evaluate(() => Math.round(cur[0].tilt)), 0, 'Eyes are friendly, without angry slants');
+    assert.equal(await page.evaluate(() => horns[0].filter(h => h.style.display === 'block').length), 5);
+    assert.equal(await page.evaluate(() => horns[0][0].style.height), '5px', 'Horns stay small');
+    assert.match(await page.evaluate(() => weatherReading.textContent), /8.C \/ Cloudy/);
+    await screenshot('halloween');
+    await page.evaluate(() => { poke(4); });
+    await page.waitForTimeout(500);
+    assert.equal(await page.evaluate(() => mood.name), 'wink');
+    assert.equal(await page.evaluate(() => weatherShowing && !toast.shake && toast.text === ''), true, 'Pokes stay playful and keep weather');
+    assert.equal(await page.evaluate(() => horns[0][0].style.display), 'block', 'Horns stay through expressions');
+    await page.evaluate(() => { toast = null; napUntil = now() + 60000; lastTouch = now() - 20000; });
+    await page.waitForFunction(() => mood.name === 'asleep', { timeout: 5000 });
+    assert.equal(await page.evaluate(() => mood.name), 'asleep', 'Explicit naps still work tonight');
+    await page.evaluate(() => { napUntil = 0; toast = null; });
+    state.mode = 'normal';
+    await inject(weather({ halloween: false, enabled: false }));
+    await page.waitForTimeout(1200);
+    assert.equal(await page.evaluate(() => HALLOWEEN || weatherShowing), false, 'Normal mode restores the usual weather schedule');
+    assert.equal(await page.evaluate(() => mood.name), 'asleep');
+    assert.equal(await page.evaluate(() => curColor), '#2a4a7a', 'Blue restores automatically');
+    await page.waitForFunction(() => horns[0].every(h => h.style.display === 'none'), { timeout: 5000 });
+    assert.equal(await page.evaluate(() => horns[0].filter(h => h.style.display === 'block').length), 0);
     await page.evaluate(() => { STANDALONE = true; });
     await page.waitForTimeout(150);
     assert.equal(await page.evaluate(() => weatherShowing || morningShowing), false, 'Standalone never displays weather');

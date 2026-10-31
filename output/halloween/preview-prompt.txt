@@ -1,0 +1,9 @@
+Generated with the built-in image_gen tool.
+
+Use case: ui-mockup
+Asset type: simple preview of an existing friendly robot face screen, 480:272 landscape proportions.
+Primary request: Keep it extremely simple and playful: just two friendly rounded red robot eyes on pure black, with two small cute red horns. The intention is playful, not scary.
+Subject: two big soft rounded rectangular eyes, friendly and slightly smiling, with no pupils, no eyebrows, no angry inward slant. Two small blunt tapered horns just above them, leaning slightly outward. No mouth. No character body. No pumpkin.
+Composition: flat straight-on screen, pure black background, large eyes around x150 and x330, y120 in a 480x272 layout. Small clean weather line along the bottom reading exactly '8°C / Cloudy' and underneath 'Copenhagen / Open-Meteo'. The weather values are illustrative placeholders for the preview. No title, no Halloween labels, no other decoration.
+Style: minimal solid rectangular pixel geometry matching an old embedded robot panel, bright friendly coral red #ff4444, tiny weather text in soft neutral grey. No lighting effects, no texture, no glow, no gradients, no bezel, no perspective. The eyes and small horns should be the only prominent visual elements.
+Constraints: must feel cute, gentle and playful, never sinister or scary. No fangs, no sharp eyebrows, no elaborate Halloween theme.

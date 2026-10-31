@@ -10,7 +10,7 @@ html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
 #label { position: absolute; left: 0; top: 6px; width: 480px; text-align: center; color: #3a5560; font: 11px Arial, sans-serif; }
 #clock { position: absolute; right: 10px; top: 6px; color: #4a6a8a; font: 14px Arial, sans-serif; }
 #note { position: absolute; left: 20px; top: 208px; width: 440px; height: 54px; text-align: center; color: #f0f6ff; font: bold 22px Arial, sans-serif; line-height: 26px; }
-.horn { position: absolute; display: none; background: #f22; font-size: 0; line-height: 0; }
+.horn { position: absolute; display: none; background: #f44; font-size: 0; line-height: 0; }
 .book { position: absolute; display: none; font-size: 0; line-height: 0; }
 .bk { position: absolute; font-size: 0; line-height: 0; }
 .heart { position: absolute; display: none; background: #f47; font-size: 0; line-height: 0; }
@@ -55,9 +55,20 @@ logToServer('boot');
 // OFF by default: the panel's fonts lack upside-down letters, so text showed as square boxes.
 // Add #flip to the address to try it (eyes and touch flip fine; text needs a pixel font to work there).
 var HASH = window.location.hash;
-// Halloween theme (pumpkin eyes, devil horns, orange/red colours) is ON HOLD: blue everywhere.
-// Set true, or add #halloween to the address, to bring it back.
-var HALLOWEEN = (HASH.indexOf('halloween') >= 0);
+// The Commands page selects a persistent mode; #halloween previews it offline.
+var faceMode = HASH.indexOf('halloween') >= 0 ? 'halloween' : 'normal';
+var HALLOWEEN = faceMode === 'halloween';
+function prepareHalloween(t) {
+  var active = faceMode === 'halloween';
+  if (active !== HALLOWEEN) { HALLOWEEN = active; curColor = ''; hornKey = ''; }
+}
+function setFaceMode(modeName) {
+  var next = modeName === 'halloween' ? 'halloween' : 'normal';
+  if (next === faceMode) { return; }
+  faceMode = next; toast = null; act = null; curKey = ''; stage = 0;
+  lastTouch = now(); sleepAfter = rnd(S_MIN, S_MAX);
+  nextIdleChange = now() + rnd(12000 * TS, 22000 * TS);
+}
 // STANDALONE = no PC needed: opened from a file (microSD card) or with #standalone. It then keeps its own
 // time from the panel's clock and its reminders from reminders.js, and never polls a server.
 var STANDALONE = (window.location.protocol === 'file:') || HASH.indexOf('standalone') >= 0;
@@ -110,7 +121,7 @@ var MOODS = {
   lonely:    { name: 'lonely',    L: { w:92,  h:88,  tilt:-1, arch:0 }, R: { w:92,  h:88,  tilt:-1, arch:0 }, lx:-34, ly:14 },  // sad, looking away
   asleep:    { name: 'asleep',    L: { w:96,  h:40,  tilt:0,  arch:0, cup:1 }, R: { w:96, h:40, tilt:0, arch:0, cup:1 }, lx:0, ly:22 },   // closed, curved eyes
   pumpkin:   { name: 'pumpkin',   L: { w:98,  h:92,  tilt:0,  arch:0, tri:1 }, R: { w:98, h:92, tilt:0, arch:0, tri:1 }, lx:0, ly:-2 },   // jack-o'-lantern eyes
-  devil:     { name: 'devil',     L: { w:108, h:84,  tilt:1.2,arch:0 }, R: { w:108, h:84, tilt:1.2, arch:0 }, lx:0, ly:6 }                   // angry, red, with horns
+  devil:     { name: 'devil',     L: { w:100, h:110, tilt:0, arch:0 }, R: { w:100, h:110, tilt:0, arch:0 }, lx:0, ly:0 }                   // friendly red eyes, with small horns
 };
 
 function now() { return new Date().getTime(); }
@@ -296,6 +307,7 @@ function onState(s) {
   lastOk = now();
   if (connLost) { connLost = false; toastNow('Back online', 'happy', null, 3000); }
   serverTs = s.ts; serverAt = now(); night = s.night;
+  if (s.mode) { setFaceMode(s.mode); }
   receiveWeather(s.weather || null);
   if (s.sound) { SOUND_MODE = s.sound; }
   if (s.cmd && s.cmd.id !== lastCmdId) { lastCmdId = s.cmd.id; try { runCommand(s.cmd); } catch (err) { logToServer('command failed: ' + err.message); } }
@@ -329,6 +341,7 @@ var CMDS = {            // name: [text, face, sound, ms]
 };
 function runCommand(c) {
   var n = c.name;
+  if (n === 'halloween' || n === 'normal') { setFaceMode(n); return; }
   if (n === 'furious') { toastNow('STOP IT!', 'angry', 'angry', 4500, null, true); return; }
   if (n === 'sleep') { toastNow('zzz...', 'asleep', null, 12000, { text: '*yawn*', mood: 'sleepy', sound: null, ms: 2500, next: null }); return; }
   if (n === 'giggle') { startAct('giggle', 'hehe'); return; }
@@ -507,6 +520,7 @@ function wanted() {
   if (toast && now() < toast.until) { return { mood: toast.mood, text: toast.text }; }
   if (morningShowing) { return { mood: morningRoutine ? MOODS.happy : MOODS.normal, text: 'Good morning!' }; }
   if (weatherRoutine) { return { mood: WEATHER_MOODS[weatherData.kind], text: '' }; }
+  if (HALLOWEEN && !(napUntil && now() < napUntil && now() - lastTouch > 15000)) { return { mood: MOODS.devil, text: '' }; }
   if (isNight() || stage === 6) { return { mood: MOODS.asleep, text: '' }; }
   if (stage === 5) { return { mood: MOODS.sleepy, text: '' }; }
   if (stage === 4) { return { mood: MOODS.wink, text: '' }; }
@@ -518,9 +532,10 @@ function wanted() {
 
 // When nobody is interacting, Bit cycles through its moods instead of becoming a screensaver.
 function updateStage() {
+  if (HALLOWEEN && !napUntil) { stage = 0; return; }
   var idle = now() - lastTouch;
   var s = 0;
-  if (!isNight()) {
+  if (!isNight() || HALLOWEEN) {
     if (idle > sleepAfter) {
       s = 6;
     } else if (napUntil) {
@@ -556,10 +571,7 @@ var SULK = { text: 'hmph...', mood: 'sad', sound: 'sad', ms: 3500, next: FINE };
 function poke(c) {
   var sleeping = isNight();
   if (HALLOWEEN) {
-    if (c === 1) { toastNow(sleeping ? 'zzz...' : (Math.random() < 0.4 ? 'trick or treat?' : ''), sleeping ? 'sleepy' : 'pumpkin', 'pumpkin', 2000); }
-    else if (c === 2) { toastNow(sleeping ? 'zzz...' : 'BOO!', sleeping ? 'sleepy' : 'surprised', 'boo', 2200); }
-    else if (c === 3) { toastNow(sleeping ? 'Let me sleep!' : 'grr!', 'devil', 'devil', 5000, SULK); }
-    else { toastNow(sleeping ? 'LET ME SLEEP!' : 'I WILL HAUNT YOU!', 'devil', 'devil', 5000, SULK, true); }
+    toastNow('', c % 2 ? 'happy' : 'wink', null, 2000);
     return;
   }
   if (c === 1) {
@@ -586,34 +598,26 @@ function setMood(m) {
   lookTX = m.lx; lookTY = m.ly;
 }
 
-var MOOD_COLORS = HALLOWEEN
-  ? { normal: '#f90', happy: '#fa0', wink: '#f90', pumpkin: '#f80', devil: '#f22', angry: '#f33',
-      sad: '#8bf', lonely: '#8bf', surprised: '#fe3', thinking: '#c8f', sleepy: '#a60', asleep: '#546' }
-  : { normal: '#3af', happy: '#4cf', wink: '#3af', pumpkin: '#3af', devil: '#3af', angry: '#2d8ff0',
+var MOOD_COLORS = { normal: '#3af', happy: '#4cf', wink: '#3af', pumpkin: '#3af', devil: '#3af', angry: '#2d8ff0',
       sad: '#6a9ad0', lonely: '#6a9ad0', surprised: '#8df', thinking: '#8ab4ff', sleepy: '#2a78b8', asleep: '#2a4a7a' };
-var ASLEEP_COLOR = HALLOWEEN ? '#546' : '#2a4a7a';
-var FURY_COLORS = HALLOWEEN ? ['#f22', '#fb0'] : ['#3af', '#d6ecff'];    // flickers between these when furious
+var ASLEEP_COLOR = '#2a4a7a';
+var FURY_COLORS = ['#3af', '#d6ecff'];
 var curColor = '', hallGreeted = false;
 function applyColor() {
   var n = isNight();
-  var d = clockDate();
-  var hallo = HALLOWEEN && !!d && d.getUTCMonth() === 9 && d.getUTCDate() === 31;        // 31 October
   if (n !== colorNight) {
     colorNight = n;
-    if (!n && serverTs) {                      // night -> day
+    if (!n && serverTs && !HALLOWEEN) {         // night -> day
       lastTouch = now();
       sleepAfter = rnd(S_MIN, S_MAX);
       idleMood = 0;
       nextIdleChange = now() + rnd(12000 * TS, 22000 * TS);
-      toastNow(hallo ? 'Happy Halloween!' : 'Good morning!', hallo ? 'pumpkin' : 'happy', null, 5000);
+      toastNow('Good morning!', 'happy', null, 5000);
     }
   }
-  if (hallo && !n && !hallGreeted && serverTs) {   // the page was opened on Halloween
-    hallGreeted = true;
-    toastNow('Happy Halloween!', 'pumpkin', null, 6000);
-  }
   var c = (morningShowing || weatherRoutine) ? '#3af' : (n || stage === 6) ? ASLEEP_COLOR : (MOOD_COLORS[mood.name] || '#3af');
-  if ((mood.name === 'devil' || mood.name === 'angry') && toast && toast.shake && now() < toast.until) {   // furious: flickers
+  if (HALLOWEEN) { c = mood.name === 'asleep' ? '#733' : '#f44'; }
+  if (!HALLOWEEN && (mood.name === 'devil' || mood.name === 'angry') && toast && toast.shake && now() < toast.until) {
     c = FURY_COLORS[Math.floor(now() / 150) % 2];
   }
   if (c !== curColor) {
@@ -683,24 +687,27 @@ function drawEye(e, blinkF) {
 
 var hornVal = 0, hornKey = '', nextTear = 0, tearStart = 0;
 function drawHorns() {
-  hornVal = ease(hornVal, (mood.name === 'devil') ? 1 : 0, 0.35);      // the horns pop up and shrink away
+  var show = HALLOWEEN && mood.name !== 'asleep' && !eyesHidden;
+  hornVal = ease(hornVal, (show || mood.name === 'devil') ? 1 : 0, 0.35);
   var rows = Math.round(hornVal * 5);
-  var key = rows + ',' + Math.round(lookX) + ',' + Math.round(lookY);
+  var key = rows + ',' + Math.round(lookX) + ',' + Math.round(lookY) + ',' + Math.round(cur[0].h) + ',' + Math.round(cur[1].h) + ',' + FLIP;
   if (key === hornKey) { return; }
   hornKey = key;
   for (var s = 0; s < 2; s++) {
     var dir = (s === 0) ? -1 : 1;                                        // each horn leans outward
     var cx = EX[s] + lookX + dir * 28;
-    var baseY = CY + lookY - 46;
+    var baseY = CY + lookY - cur[s].h / 2 - 15;
     for (var r = 0; r < 5; r++) {
       var st = horns[s][r].style;
       if (r >= rows) { st.display = 'none'; continue; }
-      var wdt = 18 - r * 3;                                              // 18,15,12,9,6: tapering
+      var wdt = 18 - r * 3;
+      var x = Math.round(cx + dir * r * 3 - wdt / 2);
+      var y = Math.round(baseY - r * 4);
       st.display = 'block';
-      st.left = Math.round(cx + dir * r * 5 - wdt / 2) + 'px';
-      st.top = Math.round(baseY - r * 8) + 'px';
+      st.left = (FLIP ? W - x - wdt : x) + 'px';
+      st.top = (FLIP ? H - y - 5 : y) + 'px';
       st.width = wdt + 'px';
-      st.height = '9px';
+      st.height = '5px';
     }
   }
 }
@@ -834,6 +841,7 @@ function frameWork() {
     else { blinkF = Math.max(0.06, Math.abs(1 - 2 * p)); }
   }
 
+  safe('prepareHalloween', prepareHalloween, t);
   safe('applyColor', applyColor);
   safe('updateStage', updateStage);
   if (STANDALONE) { safe('localTick', localTick, t); }
