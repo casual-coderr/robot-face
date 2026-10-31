@@ -29,7 +29,7 @@ var REMINDERS = [
     "mood": "sleepy",
     "sticky": false,
     "seconds": 120,
-    "enabled": false,
+    "enabled": true,
     "id": "0ac5e954"
   }
 ];

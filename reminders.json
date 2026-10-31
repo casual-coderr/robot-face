@@ -4,7 +4,7 @@
     "days": "daily",
     "text": "Good morning! Take vitamins",
     "mood": "happy",
-    "enabled": true,
+    "enabled": false,
     "id": "4ce253ea"
   },
   {

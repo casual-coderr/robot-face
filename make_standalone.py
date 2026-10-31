@@ -17,6 +17,7 @@ if os.path.isdir(OUT):
 os.makedirs(OUT)
 
 shutil.copy(os.path.join(ROOT, "face.html"), os.path.join(OUT, "index.html"))
+shutil.copy(os.path.join(ROOT, "weather.js"), os.path.join(OUT, "weather.js"))
 shutil.copytree(os.path.join(ROOT, "sounds"), os.path.join(OUT, "sounds"))
 
 with open(os.path.join(ROOT, "reminders.json"), encoding="utf-8") as f:

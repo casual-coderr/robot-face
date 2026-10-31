@@ -11,6 +11,9 @@ html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
 #clock { position: absolute; right: 10px; top: 6px; color: #4a6a8a; font: 14px Arial, sans-serif; }
 #note { position: absolute; left: 20px; top: 208px; width: 440px; height: 54px; text-align: center; color: #f0f6ff; font: bold 22px Arial, sans-serif; line-height: 26px; }
 .horn { position: absolute; display: none; background: #f22; font-size: 0; line-height: 0; }
+.book { position: absolute; display: none; font-size: 0; line-height: 0; }
+.bk { position: absolute; font-size: 0; line-height: 0; }
+.heart { position: absolute; display: none; background: #f47; font-size: 0; line-height: 0; }
 .tear { position: absolute; display: none; width: 6px; height: 11px; background: #8cf; font-size: 0; line-height: 0; }
 </style>
 </head>
@@ -29,6 +32,7 @@ html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
 <div id="screen"><div id="label"></div><div id="clock"></div><div id="note"></div></div>
 <div id="sndslot" style="position:absolute; left:0; top:0; width:1px; height:1px; overflow:hidden;"></div>
 <script type="text/javascript" src="reminders.js"></script>
+<script type="text/javascript" src="weather.js"></script>
 <script type="text/javascript">
 var W = 480, H = 272;
 // Report problems to the server log (the panel has no console), so we can see what its old IE chokes on.
@@ -102,6 +106,7 @@ var MOODS = {
   surprised: { name: 'surprised', L: { w:78,  h:130, tilt:0,  arch:0 }, R: { w:78,  h:130, tilt:0,  arch:0 }, lx:0,  ly:-4 },
   thinking:  { name: 'thinking',  L: { w:88,  h:88,  tilt:0.3,arch:0 }, R: { w:88,  h:88,  tilt:0.3,arch:0 }, lx:30, ly:-26 },
   sleepy:    { name: 'sleepy',    L: { w:108, h:40,  tilt:0.5,arch:0 }, R: { w:108, h:40,  tilt:0.5,arch:0 }, lx:0,  ly:14 },
+  reading:   { name: 'reading',   L: { w:100, h:96,  tilt:0,  arch:0 }, R: { w:100, h:96,  tilt:0,  arch:0 }, lx:0,  ly:-8 },
   lonely:    { name: 'lonely',    L: { w:92,  h:88,  tilt:-1, arch:0 }, R: { w:92,  h:88,  tilt:-1, arch:0 }, lx:-34, ly:14 },  // sad, looking away
   asleep:    { name: 'asleep',    L: { w:96,  h:40,  tilt:0,  arch:0, cup:1 }, R: { w:96, h:40, tilt:0, arch:0, cup:1 }, lx:0, ly:22 },   // closed, curved eyes
   pumpkin:   { name: 'pumpkin',   L: { w:98,  h:92,  tilt:0,  arch:0, tri:1 }, R: { w:98, h:92, tilt:0, arch:0, tri:1 }, lx:0, ly:-2 },   // jack-o'-lantern eyes
@@ -160,6 +165,88 @@ for (var hs = 0; hs < 2; hs++) {
     horns[hs].push(hd);
   }
 }
+// pixel hearts for the 'love' (heart eyes) and 'heart' (one big heart) routines: 8 rows, 10 divs each
+var HEART_ROWS = [[1,2,6,7], [0,3,5,8], [0,8], [0,8], [1,7], [2,6], [3,5], [4,4]];   // column spans per row
+var hearts = [[], []], heartKey = ['', ''], eyesHidden = false;
+for (var hh2 = 0; hh2 < 2; hh2++) {
+  for (var hrow = 0; hrow < HEART_ROWS.length; hrow++) {
+    for (var hsp = 0; hsp < HEART_ROWS[hrow].length / 2; hsp++) {
+      var hdv = document.createElement('div');
+      hdv.className = 'heart';
+      screenEl.appendChild(hdv);
+      hearts[hh2].push({ el: hdv, row: hrow, a: HEART_ROWS[hrow][hsp * 2], b: HEART_ROWS[hrow][hsp * 2 + 1] });
+    }
+  }
+}
+// a newspaper for the 'read' routine, seen from the front like someone hiding behind it: the viewer sees its
+// outside page (headline, photo, columns), the lower half of the eyes is hidden, and the eyes peek over the top.
+// Everything lives inside one div, so moving the paper is two style writes.
+var paper = document.createElement('div');
+paper.className = 'book';
+paper.style.left = '70px'; paper.style.top = '116px'; paper.style.width = '340px'; paper.style.height = '220px';
+paper.style.background = '#e9e4d4';
+screenEl.appendChild(paper);
+function pk(l, t, w, h, color) {
+  var d = document.createElement('div');
+  d.className = 'bk';
+  d.style.left = l + 'px'; d.style.top = t + 'px'; d.style.width = w + 'px'; d.style.height = h + 'px';
+  d.style.background = color;
+  paper.appendChild(d);
+  return d;
+}
+pk(0, 0, 5, 220, '#cfc9b4'); pk(335, 0, 5, 220, '#cfc9b4');      // edges
+pk(168, 0, 3, 220, '#c3bda7');                                    // the fold
+var mast = pk(20, 5, 300, 17, '#e9e4d4');                         // masthead: the paper's name in bold print
+mast.style.font = 'bold 15px Arial, sans-serif'; mast.style.lineHeight = '17px'; mast.style.textAlign = 'center';
+mast.style.color = '#2e2e2e'; mast.innerHTML = 'NEWSPAPER';
+pk(20, 24, 300, 2, '#3a3a3a');
+var heads = [pk(20, 34, 210, 11, '#2e2e2e'), pk(20, 50, 140, 11, '#2e2e2e')];   // headline
+pk(236, 34, 84, 56, '#a9b4bf'); pk(246, 56, 64, 28, '#8793a1');   // photo
+var linesA = [], linesB = [];                                     // columns of small print
+for (var pl = 0; pl < 8; pl++) {
+  linesA.push(pk(20, 76 + pl * 13, 140, 4, '#8a8672'));
+  linesB.push(pk(182, 100 + pl * 13, 138, 4, '#8a8672'));
+}
+pk(-8, 86, 16, 26, '#cfe3f7'); pk(332, 86, 16, 26, '#cfe3f7');     // two thumbs gripping the sides
+var bookShown = false, paperKey = '', paperSeed = -1;
+
+function newPage(j) {                                              // each page of print looks a bit different
+  for (var i = 0; i < 8; i++) {
+    linesA[i].style.width = (140 - ((j * 53 + i * 37) % 5) * 18) + 'px';
+    linesB[i].style.width = (138 - ((j * 41 + i * 29) % 5) * 18) + 'px';
+  }
+  heads[0].style.width = (210 - ((j * 47) % 4) * 20) + 'px';
+  heads[1].style.width = (140 - ((j * 31) % 4) * 22) + 'px';
+}
+
+function drawBook(t) {
+  var want = !!act && act.name === 'read';
+  if (want !== bookShown) {
+    bookShown = want; paperKey = ''; paperSeed = -1;
+    paper.style.display = want ? 'block' : 'none';
+  }
+  if (!want) { return; }
+  var el = t - act.start, p, dy = 0, dx = 0;
+  if (el < 700) { p = 1 - el / 700; dy = Math.round(160 * p * p); }                     // lifts the paper up
+  else if (el >= 7000 && el < 7600) { dy = Math.round(40 * (el - 7000) / 600); }         // lowers it to look at you
+  else if (el >= 7600 && el < 8700) { dy = 40; }
+  else if (el >= 8700) { p = Math.min(1, (el - 8700) / 800); dy = Math.round(40 + 140 * p * p); }   // and away
+  var seed = 0;
+  var tt = el - 1800;                                                                    // a page turn every 2.3 s
+  if (tt >= 0 && el < 6900) {
+    var n = Math.floor(tt / 2300), u = tt % 2300;
+    seed = n + (u >= 120 ? 1 : 0);
+    if (u < 500) { dx = Math.round(5 * Math.sin(u / 35) * (1 - u / 500)); }              // the paper rustles
+  } else if (tt >= 0) { seed = 3; }
+  if (seed !== paperSeed) { paperSeed = seed; newPage(seed); }
+  var key = dx + ',' + dy;
+  if (key !== paperKey) {
+    paperKey = key;
+    paper.style.left = (70 + dx) + 'px';
+    paper.style.top = (116 + dy) + 'px';
+  }
+}
+
 var tearEl = document.createElement('div');
 tearEl.className = 'tear';
 screenEl.appendChild(tearEl);
@@ -177,18 +264,24 @@ var joltUntil = 0;                // a notice makes it jump first: it startles e
 // ---- pet behaviour: how it's been treated decides how it feels ----
 // Add ?fast to the address to run the lonely timers 20x quicker when testing.
 var TS = (window.location.search.indexOf('fast') >= 0) ? 0.05 : 1;
-var T_BORED = 45000 * TS, T_LONELY = 120000 * TS, T_SULK = 240000 * TS, T_SLEEP = 420000 * TS;   // 45 s, 2, 4, 7 min
+var T_BORED = 30000 * TS, T_LONELY = 120000 * TS, T_SULK = 240000 * TS, T_SLEEP = 5400000 * TS;   // 30 s, 2, 4, 90 min
 var lastTouch = now();            // last time anyone touched it
+var napUntil = 0;                 // a long sleep from /commands: when poked awake it dozes off again until then
 try {                             // a timed reload hands the "last touched" time over via window.name
   if (window.name.indexOf('bit:') === 0) {
-    var lt0 = Number(window.name.substring(4));
+    var wp = window.name.substring(4).split(':');
+    var lt0 = Number(wp[0]);
     if (lt0 > 0 && lt0 <= now()) { lastTouch = lt0; }
+    var nu0 = Number(wp[1]);
+    if (nu0 > now()) { napUntil = nu0; }
     window.name = '';
   }
 } catch (err) { }
-var stage = 0;                    // 0 happy, 1 bored, 2 lonely, 3 sulking, 4 asleep
-var S_MIN = 60000 * TS, S_MAX = T_SLEEP;      // when left alone it dozes off at a random time between these
+var stage = 0;                    // 0 fresh, 1 curious, 2 playful, 3 thoughtful, 4 social, 5 sleepy, 6 asleep
+var S_MIN = 1800000 * TS, S_MAX = T_SLEEP;      // daytime rest is rare; explicit naps and nighttime still sleep
 var sleepAfter = rnd(S_MIN, S_MAX);          // re-rolled every time it is touched
+var idleMood = 0;
+var nextIdleChange = now() + rnd(12000 * TS, 22000 * TS);
 var lastWhimper = 0;
 var tapCount = 0, lastTap = 0;    // quick taps in a row make it annoyed
 var welcomeBack = false;          // it was lonely when this touch started
@@ -203,7 +296,9 @@ function onState(s) {
   lastOk = now();
   if (connLost) { connLost = false; toastNow('Back online', 'happy', null, 3000); }
   serverTs = s.ts; serverAt = now(); night = s.night;
+  receiveWeather(s.weather || null);
   if (s.sound) { SOUND_MODE = s.sound; }
+  if (s.cmd && s.cmd.id !== lastCmdId) { lastCmdId = s.cmd.id; try { runCommand(s.cmd); } catch (err) { logToServer('command failed: ' + err.message); } }
   notice = s.notice;
   if (notice && (notice.id + '|' + notice.text) === dismissed && now() - dismissedAt < 3600000) {
     notice = null;                         // you already dismissed this one
@@ -217,6 +312,42 @@ function onState(s) {
       playSound(notice.sound, true, true);
     }
   } else { shownId = null; }
+}
+
+// a command from the /commands page: Bit does it, then goes back to whatever it was doing
+var lastCmdId = 0;
+var CMDS = {            // name: [text, face, sound, ms]
+  happy:     ['yay!', 'happy', 'happy', 3000],
+  wink:      ['', 'wink', 'wink', 2500],
+  angry:     ['grr!', 'angry', 'angry', 3500],
+  sad:       ['sniff...', 'sad', 'sad', 4000],
+  lonely:    ['...you there?', 'lonely', null, 5000],
+  surprised: ['!?', 'surprised', 'surprised', 2500],
+  thinking:  ['hmm...', 'thinking', 'thinking', 4000],
+  yawn:      ['*yawn*', 'sleepy', null, 3500],
+  hello:     ['hello!', 'happy', 'happy', 3000]
+};
+function runCommand(c) {
+  var n = c.name;
+  if (n === 'furious') { toastNow('STOP IT!', 'angry', 'angry', 4500, null, true); return; }
+  if (n === 'sleep') { toastNow('zzz...', 'asleep', null, 12000, { text: '*yawn*', mood: 'sleepy', sound: null, ms: 2500, next: null }); return; }
+  if (n === 'giggle') { startAct('giggle', 'hehe'); return; }
+  if (n === 'song') { startAct('song', 'la la la'); return; }
+  if (n === 'love') { startAct('love', ''); return; }
+  if (n === 'heart') { startAct('heart', ''); return; }
+  if (n === 'lookaround') { startAct('lookaround', ''); return; }
+  if (n === 'read') { startAct('read', ''); return; }
+  if (n === 'nap') {
+    var mins = parseInt(c.text, 10);
+    if (!(mins > 0 && mins <= 720)) { mins = 30; }
+    napUntil = now() + mins * 60000;
+    lastTouch = now() - 16000;                              // falls asleep right away
+    return;
+  }
+  if (n === 'wake') { napUntil = 0; lastTouch = now(); toastNow('Good morning!', 'happy', null, 3500); return; }
+  if (n === 'say') { toastNow(c.text || '', MOODS[c.mood] ? c.mood : 'happy', null, 5000); return; }
+  var d = CMDS[n];
+  if (d) { toastNow(d[0], d[1], d[2], d[3]); }
 }
 
 function poll() {
@@ -310,6 +441,7 @@ function drawClock() {
   if (!d) { return; }
   var s = DOW[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MON[d.getUTCMonth()] + '  ' +
           two(d.getUTCHours()) + ':' + two(d.getUTCMinutes());
+  if (weatherShowing) { s = two(d.getUTCHours()) + ':' + two(d.getUTCMinutes()); }
   if (s !== lastClock) { lastClock = s; setText(clockEl, s); }
 }
 
@@ -344,11 +476,13 @@ function playSound(name, force, notice) {
 // ---------------------------------------------------------------- behaviour
 var act = null;   // scripted routine: song (sway + bounce) or giggle (jiggle)
 function startAct(name, text) {
-  act = { name: name, start: now(), dur: (name === 'song') ? 2500 : 1000 };
-  setMood(MOODS.happy);
+  var durs = { song: 2500, love: 4000, heart: 4000, lookaround: 3600, read: 9600 };
+  act = { name: name, start: now(), dur: durs[name] || 1000 };
+  toast = null;
+  setMood(name === 'read' ? MOODS.reading : MOODS.happy);
   curKey = '';
   setText(noteEl, text || '');
-  playSound(name, true);
+  if (name === 'song' || name === 'giggle') { playSound(name, true); }
 }
 
 // a short-lived reaction; `next` (same fields) plays when it ends, e.g. angry -> sulk
@@ -371,26 +505,48 @@ function wanted() {
     toastNow(n.text, n.mood, n.sound, n.ms, n.next);
   }
   if (toast && now() < toast.until) { return { mood: toast.mood, text: toast.text }; }
-  if (isNight() || stage === 4) { return { mood: MOODS.asleep, text: '' }; }
-  if (stage === 3) { return { mood: MOODS.lonely, text: '' }; }
-  if (stage === 2) { return { mood: MOODS.sad, text: '' }; }
+  if (morningShowing) { return { mood: morningRoutine ? MOODS.happy : MOODS.normal, text: 'Good morning!' }; }
+  if (weatherRoutine) { return { mood: WEATHER_MOODS[weatherData.kind], text: '' }; }
+  if (isNight() || stage === 6) { return { mood: MOODS.asleep, text: '' }; }
+  if (stage === 5) { return { mood: MOODS.sleepy, text: '' }; }
+  if (stage === 4) { return { mood: MOODS.wink, text: '' }; }
+  if (stage === 3) { return { mood: MOODS.reading, text: '' }; }
+  if (stage === 2) { return { mood: MOODS.happy, text: '' }; }
+  if (stage === 1) { return { mood: MOODS.thinking, text: '' }; }
   return { mood: MOODS.normal, text: '' };
 }
 
-// stage changes as time passes without a touch
+// When nobody is interacting, Bit cycles through its moods instead of becoming a screensaver.
 function updateStage() {
   var idle = now() - lastTouch;
   var s = 0;
   if (!isNight()) {
-    s = idle > sleepAfter ? 4 : idle > T_SULK ? 3 : idle > T_LONELY ? 2 : idle > T_BORED ? 1 : 0;
+    if (idle > sleepAfter) {
+      s = 6;
+    } else if (napUntil) {
+      s = idle > 15000 ? 6 : 0;
+    } else if (idle > T_BORED) {
+      if (now() >= nextIdleChange) {
+        idleMood = (idleMood + 1) % 5;
+        nextIdleChange = now() + rnd(12000 * TS, 26000 * TS);
+      }
+      s = idleMood + 1;
+    }
+    if (napUntil) {
+      if (now() > napUntil) {                               // the long sleep is over
+        napUntil = 0; lastTouch = now(); sleepAfter = rnd(S_MIN, S_MAX); nextIdleChange = now() + rnd(12000 * TS, 22000 * TS); s = 0;
+        toastNow('Good morning!', 'happy', null, 4000);
+      } else if (idle > 15000) { s = 6; }                   // poked awake? back to sleep after 15 s
+    }
   }
   if (s !== stage) {
     stage = s;
-    // nobody is touching it, so it never makes a sound on its own
-    if (s === 1) { toastNow('*yawn*', 'sleepy', null, 3500); }
-    else if (s === 2) { toastNow('hello?', 'sad', null, 4000); }
-    else if (s === 3) { toastNow('...you there?', 'lonely', null, 5000); }
-    else if (s === 4) { toastNow('zzz...', 'sleepy', null, 2500); }        // nods off
+    if (s === 1) { toastNow('hmm...', 'thinking', null, 2500); }
+    else if (s === 2) { toastNow('bip!', 'happy', null, 1800); }
+    else if (s === 3) { toastNow('reading...', 'reading', null, 2500); }
+    else if (s === 4) { toastNow('hey you', 'wink', null, 2200); }
+    else if (s === 5) { toastNow('*yawn*', 'sleepy', null, 3000); }
+    else if (s === 6) { toastNow('zzz...', 'sleepy', null, 2500); }
   }
 }
 
@@ -447,14 +603,16 @@ function applyColor() {
     if (!n && serverTs) {                      // night -> day
       lastTouch = now();
       sleepAfter = rnd(S_MIN, S_MAX);
+      idleMood = 0;
+      nextIdleChange = now() + rnd(12000 * TS, 22000 * TS);
       toastNow(hallo ? 'Happy Halloween!' : 'Good morning!', hallo ? 'pumpkin' : 'happy', null, 5000);
     }
   }
   if (hallo && !n && !hallGreeted && serverTs) {   // the page was opened on Halloween
     hallGreeted = true;
-    toastNow('Happy Halloween!', 'pumpkin', 'pumpkin', 6000);
+    toastNow('Happy Halloween!', 'pumpkin', null, 6000);
   }
-  var c = (n || stage === 4) ? ASLEEP_COLOR : (MOOD_COLORS[mood.name] || '#3af');
+  var c = (morningShowing || weatherRoutine) ? '#3af' : (n || stage === 6) ? ASLEEP_COLOR : (MOOD_COLORS[mood.name] || '#3af');
   if ((mood.name === 'devil' || mood.name === 'angry') && toast && toast.shake && now() < toast.until) {   // furious: flickers
     c = FURY_COLORS[Math.floor(now() / 150) % 2];
   }
@@ -473,7 +631,7 @@ function drawEye(e, blinkF) {
   var p = cur[e];
   var w = p.w, h = p.h * blinkF;
   if (h < 3) { h = 3; }
-  var cx = EX[e] + lookX, cy = CY + lookY;
+  var cx = EX[e] + (e === 0 ? weatherEyeInset : -weatherEyeInset) + morningEyeShift + lookX, cy = CY + lookY;
   var r = Math.min(26, h / 2, w / 2);
   var sw = w / N;
   var left = cx - w / 2;
@@ -548,7 +706,7 @@ function drawHorns() {
 }
 
 function updateTear(t) {                                                 // lonely: a tear rolls down now and then
-  var show = (stage === 2 || stage === 3) && !notice && !act && !(toast && t < toast.until);
+  var show = !morningShowing && !weatherRoutine && (stage === 2 || stage === 3) && !notice && !act && !(toast && t < toast.until);
   if (show && tearStart === 0 && t >= nextTear) { tearStart = t; nextTear = t + rnd(4000, 7000); }
   if (tearStart === 0) { return; }
   var p = (t - tearStart) / 1500;
@@ -614,6 +772,40 @@ function sleepTick(t) {
   if (t >= nextZ) { spawnZ(0); nextZ = t + rnd(1800, 4200); }
 }
 
+// hearts replace the eyes while a 'love' / 'heart' routine runs, and beat like a pulse
+function drawHearts(t) {
+  var kind = act ? act.name : '';
+  var want = (kind === 'love' || kind === 'heart');
+  if (want !== eyesHidden) {
+    eyesHidden = want;
+    for (var e = 0; e < 2; e++) {
+      for (var i = 0; i < N; i++) { slices[e][i].style.display = want ? 'none' : 'block'; }
+    }
+  }
+  for (var h = 0; h < 2; h++) {
+    var show = want && (h === 0 || kind === 'love');
+    var key = '';
+    if (show) {
+      var el = t - act.start;
+      var base = (kind === 'love') ? 10 : 20;                              // cell size in px
+      var cell = Math.round(base * (1 + 0.14 * Math.abs(Math.sin(el / 230))));   // heartbeat
+      var cx = (kind === 'love') ? EX[h] : 240;
+      key = cell + ',' + cx;
+    }
+    if (key === heartKey[h]) { continue; }
+    heartKey[h] = key;
+    for (var k = 0; k < hearts[h].length; k++) {
+      var p = hearts[h][k], st = p.el.style;
+      if (!show) { st.display = 'none'; continue; }
+      st.display = 'block';
+      st.left = Math.round(cx - 4.5 * cell + p.a * cell) + 'px';
+      st.top = Math.round(CY - 4 * cell + p.row * cell) + 'px';
+      st.width = ((p.b - p.a + 1) * cell) + 'px';
+      st.height = cell + 'px';
+    }
+  }
+}
+
 var frameCost = 0;     // smoothed ms of work per frame (type frameCost in a console to see it)
 var lastVals = '';
 var stepErr = {};
@@ -645,6 +837,7 @@ function frameWork() {
   safe('applyColor', applyColor);
   safe('updateStage', updateStage);
   if (STANDALONE) { safe('localTick', localTick, t); }
+  safe('prepareWeather', prepareWeather, t);
 
   // scripted routines take over the gaze until they finish
   if (act) {
@@ -653,6 +846,14 @@ function frameWork() {
     else if (act.name === 'song') {
       lookTX = 16 * Math.sin(el / 330);
       lookTY = -10 * Math.abs(Math.sin(Math.PI * el / 230));   // a bounce on every note
+    } else if (act.name === 'read') {                       // eyes sweep along the lines, drop to the next one
+      if (el >= 7000 && !act.peek) { act.peek = true; setMood(MOODS.happy); }          // looks at you over the paper, smiling
+      if (act.peek) { lookTX = 0; lookTY = 0; }
+      else { lookTX = 16 * Math.sin(el / 420); lookTY = -8 + 3 * Math.floor((el / 840) % 3); }
+    } else if (act.name === 'love' || act.name === 'heart') {
+      lookTX = 0; lookTY = 0;
+    } else if (act.name === 'lookaround') {
+      lookTX = 34 * Math.sin(el / 420); lookTY = 6 * Math.sin(el / 260);
     } else {
       lookTX = (Math.floor(el / 60) % 2) ? 8 : -8;
       lookTY = 0;
@@ -677,6 +878,9 @@ function frameWork() {
     }
   }
 
+  if (morningRoutine && !dragging) { lookTX = 0; lookTY = -4 * Math.abs(Math.sin(weatherPhase / 400)); }
+  else if (weatherRoutine && !dragging) { lookTX = 0; lookTY = mood.ly; }
+
   // ease towards targets
   for (var e = 0; e < 2; e++) {
     cur[e].w = ease(cur[e].w, tgt[e].w, 0.42);
@@ -693,10 +897,13 @@ function frameWork() {
   safe('drawEye0', drawEye, 0, blinkF);
   safe('drawEye1', drawEye, 1, (mood.name === 'wink' && blinkF < 1) ? blinkF : (mood.name === 'wink' ? 1 : blinkF));
 
+  safe('drawHearts', drawHearts, t);
+  safe('drawBook', drawBook, t);
   safe('drawClock', drawClock);
   safe('updateZs', updateZs, t);
   safe('drawHorns', drawHorns);
   safe('updateTear', updateTear, t);
+  safe('drawWeather', drawWeather, t);
   if (labelUntil && t > labelUntil) { setText(labelEl, ''); labelUntil = 0; }
 }
 
@@ -732,6 +939,8 @@ function touchStart(q) {
   welcomeBack = (stage >= 2);                        // was it lonely before this touch?
   lastTouch = now();
   sleepAfter = rnd(S_MIN, S_MAX);                    // next time it is left alone, a new random bedtime
+  idleMood = 0;
+  nextIdleChange = now() + rnd(12000 * TS, 22000 * TS);
   lookTX = (q.x - W / 2) / (W / 2) * 30;
   lookTY = (q.y - H / 2) / (H / 2) * 18;
   dbg('down ' + q.x + ',' + q.y);
@@ -827,11 +1036,12 @@ function layoutFlip() {
   lastClock = ''; curKey = '';                        // redraw the text in the right orientation
 }
 layoutFlip();
+initWeather();
 
 var RELOAD_MS = 10 * 60 * 1000;   // reload the page every 10 minutes; later change to 60 * 60 * 1000 for every hour
 function reloadNow() {
   if (dragging) { setTimeout(reloadNow, 5000); return; }          // never reload under someone's finger
-  try { window.name = 'bit:' + lastTouch; } catch (err) { }
+  try { window.name = 'bit:' + lastTouch + ':' + napUntil; } catch (err) { }
   window.location.replace(window.location.pathname + '?r=' + now() + window.location.hash);
 }
 if (!STANDALONE) { setTimeout(reloadNow, RELOAD_MS); }

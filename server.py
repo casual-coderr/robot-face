@@ -23,6 +23,7 @@ import time
 import urllib.parse
 import uuid
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from weather import MorningWeather
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = 8765
@@ -44,6 +45,7 @@ notices = []               # oldest first; the face shows notices[0]
 counter = 0
 last_cmd = None             # the newest command from /commands; the face runs each one once
 fired = set()              # (date, reminder id) already shown
+weather = MorningWeather()
 
 
 def build_id():
@@ -261,7 +263,7 @@ class Handler(SimpleHTTPRequestHandler):
             ts = int(time.time() + off)
             state = {"ts": ts, "night": NIGHT, "notice": current_notice(),
                      "flip": self.client_address[0] in FLIP_CLIENTS, "sound": SOUND_MODE,
-                     "build": build_id(), "cmd": current_cmd()}
+                     "build": build_id(), "cmd": current_cmd(), "weather": weather.state()}
             cb = q.get("cb", "")
             if cb:
                 # script-tag reply for the panel's old browser: onState({...});
@@ -394,6 +396,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     threading.Thread(target=reminder_loop, daemon=True).start()
+    threading.Thread(target=weather.run, daemon=True).start()
     handler = functools.partial(Handler, directory=ROOT)
     print("Robot face on http://0.0.0.0:%d/   reminders: /reminders" % PORT)
     ThreadingHTTPServer(("0.0.0.0", PORT), handler).serve_forever()
