@@ -65,9 +65,8 @@ function prepareHalloween(t) {
 function setFaceMode(modeName) {
   var next = modeName === 'halloween' ? 'halloween' : 'normal';
   if (next === faceMode) { return; }
-  faceMode = next; toast = null; act = null; curKey = ''; stage = 0;
-  lastTouch = now(); sleepAfter = rnd(S_MIN, S_MAX);
-  nextIdleChange = now() + rnd(12000 * TS, 22000 * TS);
+  faceMode = next; toast = null; act = null; curKey = ''; stage = ST_AWAKE;
+  lastTouch = now(); resetIdle();
 }
 // STANDALONE = no PC needed: opened from a file (microSD card) or with #standalone. It then keeps its own
 // time from the panel's clock and its reminders from reminders.js, and never polls a server.
@@ -275,8 +274,16 @@ var joltUntil = 0;                // a notice makes it jump first: it startles e
 // ---- pet behaviour: how it's been treated decides how it feels ----
 // Add ?fast to the address to run the lonely timers 20x quicker when testing.
 var TS = (window.location.search.indexOf('fast') >= 0) ? 0.05 : 1;
-var T_BORED = 30000 * TS, T_LONELY = 120000 * TS, T_SULK = 240000 * TS, T_SLEEP = 5400000 * TS;   // 30 s, 2, 4, 90 min
+// What it does when left alone (all x TS, so ?fast runs everything 20x quicker). It is busy with small actions of its
+// own (the director below); after 20-40 quiet minutes it gets drowsy, dozes for 2-6 minutes and wakes itself; after
+// 45-75 minutes with nobody about it turns a little wistful. At night (isNight) it sleeps.
+var DROWSY_MIN = 1200000 * TS, DROWSY_MAX = 2400000 * TS;
+var LONELY_MIN = 2700000 * TS, LONELY_MAX = 4500000 * TS;
+var ST_AWAKE = 0, ST_DROWSY = 1, ST_NAP = 2, ST_LONELY = 3;
+var bootAt = now();
 var lastTouch = now();            // last time anyone touched it
+var lastRest = now();             // last touch or last time it woke from a doze: the drowsy timer counts from here
+var napPhase = 0, napPhaseEnd = 0;   // its own doze: 0 awake, 1 drowsy, 2 dozing
 var napUntil = 0;                 // a long sleep from /commands: when poked awake it dozes off again until then
 try {                             // a timed reload hands the "last touched" time over via window.name
   if (window.name.indexOf('bit:') === 0) {
@@ -285,17 +292,26 @@ try {                             // a timed reload hands the "last touched" tim
     if (lt0 > 0 && lt0 <= now()) { lastTouch = lt0; }
     var nu0 = Number(wp[1]);
     if (nu0 > now()) { napUntil = nu0; }
+    var lr0 = Number(wp[2]);
+    if (lr0 > 0 && lr0 <= now()) { lastRest = lr0; }
+    var np0 = Number(wp[3]), ne0 = Number(wp[4]);
+    if ((np0 === 1 || np0 === 2) && ne0 > now()) { napPhase = np0; napPhaseEnd = ne0; }
     window.name = '';
   }
 } catch (err) { }
-var stage = 0;                    // 0 fresh, 1 curious, 2 playful, 3 thoughtful, 4 social, 5 sleepy, 6 asleep
-var S_MIN = 1800000 * TS, S_MAX = T_SLEEP;      // daytime rest is rare; explicit naps and nighttime still sleep
-var sleepAfter = rnd(S_MIN, S_MAX);          // re-rolled every time it is touched
-var idleMood = 0;
-var nextIdleChange = now() + rnd(12000 * TS, 22000 * TS);
+var stage = ST_AWAKE;             // ST_AWAKE busy with its own actions, ST_DROWSY, ST_NAP dozing, ST_LONELY wistful
+var drowsyGap = rnd(DROWSY_MIN, DROWSY_MAX), lonelyGap = rnd(LONELY_MIN, LONELY_MAX);
+function resetIdle() {            // a touch, a wake-up or a mode change: start the quiet-time clocks again
+  lastRest = now();
+  napPhase = 0;
+  drowsyGap = rnd(DROWSY_MIN, DROWSY_MAX);
+  lonelyGap = rnd(LONELY_MIN, LONELY_MAX);
+  beatNext = now() + rnd(3000, 6000) * TS;
+}
 var lastWhimper = 0;
 var tapCount = 0, lastTap = 0;    // quick taps in a row make it annoyed
 var welcomeBack = false;          // it was lonely when this touch started
+var wokeFromNap = false;          // it was dozing when this touch started
 
 // The old Windows CE IE may have no usable XMLHttpRequest, so we talk to the server the
 // oldest way there is: inject <script src="api/state?cb=onState"> and let the reply call us.
@@ -308,6 +324,7 @@ function onState(s) {
   if (connLost) { connLost = false; toastNow('Back online', 'happy', null, 3000); }
   serverTs = s.ts; serverAt = now(); night = s.night;
   if (s.mode) { setFaceMode(s.mode); }
+  if (s.pace && PACE_MUL[s.pace]) { PACE = s.pace; }
   receiveWeather(s.weather || null);
   if (s.sound) { SOUND_MODE = s.sound; }
   if (s.cmd && s.cmd.id !== lastCmdId) { lastCmdId = s.cmd.id; try { runCommand(s.cmd); } catch (err) { logToServer('command failed: ' + err.message); } }
@@ -358,6 +375,7 @@ function runCommand(c) {
     return;
   }
   if (n === 'wake') { napUntil = 0; lastTouch = now(); toastNow('Good morning!', 'happy', null, 3500); return; }
+  if (n === 'behave') { if (BEATS[c.text]) { beatCancel(); beatPlan = c.text; beatNext = 0; } return; }
   if (n === 'say') { toastNow(c.text || '', MOODS[c.mood] ? c.mood : 'happy', null, 5000); return; }
   var d = CMDS[n];
   if (d) { toastNow(d[0], d[1], d[2], d[3]); }
@@ -443,7 +461,7 @@ function clockDate() {
 function isNight() {
   var d = clockDate();
   if (!d) { return false; }
-  var h = d.getUTCHours();
+  var h = d.getUTCHours() + d.getUTCMinutes() / 60;      // night may start on a half hour, e.g. [22.5, 7]
   return (night[0] > night[1]) ? (h >= night[0] || h < night[1]) : (h >= night[0] && h < night[1]);
 }
 var DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -488,14 +506,14 @@ function playSound(name, force, notice) {
 
 // ---------------------------------------------------------------- behaviour
 var act = null;   // scripted routine: song (sway + bounce) or giggle (jiggle)
-function startAct(name, text) {
+function startAct(name, text, loud) {                        // loud: play the sound even on the panel (a tap reaction)
   var durs = { song: 2500, love: 4000, heart: 4000, lookaround: 3600, read: 9600 };
   act = { name: name, start: now(), dur: durs[name] || 1000 };
   toast = null;
   setMood(name === 'read' ? MOODS.reading : MOODS.happy);
   curKey = '';
   setText(noteEl, text || '');
-  if (name === 'song' || name === 'giggle') { playSound(name, true); }
+  if (name === 'song' || name === 'giggle') { playSound(name, true, !!loud); }
 }
 
 // a short-lived reaction; `next` (same fields) plays when it ends, e.g. angry -> sulk
@@ -520,49 +538,243 @@ function wanted() {
   if (toast && now() < toast.until) { return { mood: toast.mood, text: toast.text }; }
   if (morningShowing) { return { mood: morningRoutine ? MOODS.happy : MOODS.normal, text: 'Good morning!' }; }
   if (weatherRoutine) { return { mood: WEATHER_MOODS[weatherData.kind], text: '' }; }
-  if (HALLOWEEN && !(napUntil && now() < napUntil && now() - lastTouch > 15000)) { return { mood: MOODS.devil, text: '' }; }
-  if (isNight() || stage === 6) { return { mood: MOODS.asleep, text: '' }; }
-  if (stage === 5) { return { mood: MOODS.sleepy, text: '' }; }
-  if (stage === 4) { return { mood: MOODS.wink, text: '' }; }
-  if (stage === 3) { return { mood: MOODS.reading, text: '' }; }
-  if (stage === 2) { return { mood: MOODS.happy, text: '' }; }
-  if (stage === 1) { return { mood: MOODS.thinking, text: '' }; }
+  if (HALLOWEEN && stage !== ST_NAP) { return { mood: MOODS.devil, text: '' }; }
+  if (isNight() || stage === ST_NAP) { return { mood: MOODS.asleep, text: '' }; }
+  if (stage === ST_DROWSY) { return { mood: MOODS.sleepy, text: '' }; }
+  if (stage === ST_LONELY) { return { mood: MOODS.lonely, text: '' }; }
   return { mood: MOODS.normal, text: '' };
 }
 
-// When nobody is interacting, Bit cycles through its moods instead of becoming a screensaver.
+// How long it has been left alone decides its state (see the constants above).
 function updateStage() {
-  if (HALLOWEEN && !napUntil) { stage = 0; return; }
-  var idle = now() - lastTouch;
-  var s = 0;
-  if (!isNight() || HALLOWEEN) {
-    if (idle > sleepAfter) {
-      s = 6;
-    } else if (napUntil) {
-      s = idle > 15000 ? 6 : 0;
-    } else if (idle > T_BORED) {
-      if (now() >= nextIdleChange) {
-        idleMood = (idleMood + 1) % 5;
-        nextIdleChange = now() + rnd(12000 * TS, 26000 * TS);
-      }
-      s = idleMood + 1;
-    }
-    if (napUntil) {
-      if (now() > napUntil) {                               // the long sleep is over
-        napUntil = 0; lastTouch = now(); sleepAfter = rnd(S_MIN, S_MAX); nextIdleChange = now() + rnd(12000 * TS, 22000 * TS); s = 0;
-        toastNow('Good morning!', 'happy', null, 4000);
-      } else if (idle > 15000) { s = 6; }                   // poked awake? back to sleep after 15 s
-    }
+  var t = now(), idle = t - lastTouch, s = ST_AWAKE;
+  if (napUntil) {                                           // an explicit long sleep from /commands
+    if (t > napUntil) {
+      napUntil = 0; lastTouch = t; resetIdle();
+      toastNow('Good morning!', 'happy', null, 4000);
+      beatPlan = 'stretch'; beatNext = t + 4200;
+    } else if (idle > 15000) { s = ST_NAP; }                // poked awake? back to sleep after 15 s
+  } else if (!HALLOWEEN && !isNight()) {
+    if (napPhase === 0 && t - lastRest > drowsyGap) { napPhase = 1; napPhaseEnd = t + rnd(60000, 110000) * TS; }
+    else if (napPhase === 1 && t > napPhaseEnd) { napPhase = 2; napPhaseEnd = t + rnd(120000, 360000) * TS; }
+    else if (napPhase === 2 && t > napPhaseEnd) { resetIdle(); wakeUp(); }
+    if (napPhase === 1) { s = ST_DROWSY; }
+    else if (napPhase === 2) { s = ST_NAP; }
+    else if (idle > lonelyGap) { s = ST_LONELY; }
   }
   if (s !== stage) {
     stage = s;
-    if (s === 1) { toastNow('hmm...', 'thinking', null, 2500); }
-    else if (s === 2) { toastNow('bip!', 'happy', null, 1800); }
-    else if (s === 3) { toastNow('reading...', 'reading', null, 2500); }
-    else if (s === 4) { toastNow('hey you', 'wink', null, 2200); }
-    else if (s === 5) { toastNow('*yawn*', 'sleepy', null, 3000); }
-    else if (s === 6) { toastNow('zzz...', 'sleepy', null, 2500); }
+    if (s === ST_DROWSY) { beatPlan = 'yawn'; beatNext = t; }
+    else if (s === ST_NAP) { toastNow('zzz...', 'sleepy', null, 2500); }
+    else if (s === ST_LONELY) { toastNow('...you there?', 'lonely', null, 4000); }
   }
+}
+function wakeUp() {                                         // it woke itself: a good stretch
+  beatCancel(); toast = null; curKey = '';
+  beatPlan = 'stretch'; beatNext = now();
+}
+
+// ---------------------------------------------------------------- idle director
+// While nobody is touching it, Bit does small things on its own: glances at the door, scans the room, stretches,
+// follows a fly, sighs. One action ("beat") at a time, every 8-20 s (x PACE), picked by weight from what suits the
+// moment (time of day, drowsy, wistful). A beat only steers the gaze and nudges the eye shapes relative to the
+// current mood, so it works on any base face (normal, sleepy, wistful, Halloween devil) and stops the moment
+// anything real happens (see beatOK). Eye size/spacing (poseScale, poseGap) ease like the weather props do.
+var PACE = 'normal';                                        // calm | normal | lively: set from /commands, or ?pace=calm
+var PACE_MUL = { calm: 2, normal: 1, lively: 0.5 };
+var FORCE_BEAT = '';                                        // ?behave=scan repeats one action (for testing)
+try {
+  var pm = /[?&]pace=([a-z]+)/.exec(window.location.search);
+  if (pm && PACE_MUL[pm[1]]) { PACE = pm[1]; }
+  var bm = /[?&]behave=([A-Za-z]+)/.exec(window.location.search);
+  if (bm) { FORCE_BEAT = bm[1]; }
+} catch (err) { }
+var beat = null, beatNext = now() + rnd(3000, 6000), beatPlan = '', beatRan = false, beatLast = ['', ''];
+var lookK = 0.35;                                           // how fast the gaze follows its target (a glance is quick, a drift slow)
+var poseScale = 1, poseScaleT = 1, poseGap = 0, poseGapT = 0, squash = 0;   // eye size and spacing (target T)
+
+function pathAt(el, pts) {                                  // keyframes [ms, x, y]: stepped, the eased gaze turns them into glances
+  var k = pts[0];
+  for (var i = 0; i < pts.length; i++) { if (el >= pts[i][0]) { k = pts[i]; } }
+  lookTX = k[1]; lookTY = k[2];
+}
+function shape(lw, lh, lt, rw, rh, rt, arch) {              // eye shapes relative to the current mood (width/height factors, extra tilt)
+  var a = mood.L, b = mood.R;
+  tgt = [ { w: a.w * lw, h: a.h * lh, tilt: a.tilt + lt, arch: (a.arch || 0) + arch, cup: 0, tri: a.tri || 0 },
+          { w: b.w * rw, h: b.h * rh, tilt: b.tilt + rt, arch: (b.arch || 0) + arch, cup: 0, tri: b.tri || 0 } ];
+}
+function shapeIf(on, lw, lh, lt, rw, rh, rt, arch) {
+  if (on) { shape(lw, lh, lt, rw, rh, rt, arch); } else { tgt = [mood.L, mood.R]; }
+}
+function forceBlink(t) { if (blinkStart === 0) { blinkStart = t; } }
+
+var BEATS = {        // w = base weight, dur = ms, run(el) steers one frame, say = optional word (sayP = chance)
+  lookLR: { w: 10, dur: 2600, run: function (el) {
+    lookK = 0.5;
+    pathAt(el, [[0, 0, 0], [250, -40, -2], [1000, -40, -2], [1250, 40, 0], [2000, 40, 0], [2300, 0, 0]]);
+  } },
+  lookUp: { w: 6, dur: 2400, run: function (el) {
+    lookK = 0.4;
+    pathAt(el, [[0, 0, 0], [200, 24, -20], [1500, 24, -20], [1800, 0, 0]]);
+    shapeIf(el < 1800, 0.95, 1.1, 0, 0.95, 1.1, 0, 0);
+    poseScaleT = (el < 1800) ? 1.07 : 1;
+  } },
+  peekDoor: { w: 6, dur: 2900, run: function (el) {         // the door is on the right of the panel
+    lookK = 0.55;
+    pathAt(el, [[0, 0, 0], [250, 50, 2], [1000, 50, 2], [1200, 0, 0], [1600, 50, 2], [2400, 50, 2], [2650, 0, 0]]);
+    poseScaleT = (el >= 250 && el < 2400) ? 1.06 : 1;
+  } },
+  clockGlance: { w: 5, dur: 2300, run: function (el) {      // the clock is top right
+    lookK = 0.45;
+    pathAt(el, [[0, 0, 0], [300, 52, -24], [1500, 52, -24], [1800, 0, 0]]);
+    poseScaleT = (el >= 300 && el < 1500) ? 1.06 : 1;
+  } },
+  scan: { w: 5, dur: 4400, say: ['hm?'], sayP: 0.3, run: function (el) {   // small, quick eyes sweep the room
+    lookK = 0.45;
+    poseScaleT = (el < 3800) ? 0.9 : 1;
+    lookTX = (el < 3800) ? 54 * Math.sin(el / 560) : 0;
+    lookTY = -2;
+  } },
+  curious: { w: 7, dur: 3000, run: function (el) {          // one raised brow, leans towards something
+    lookK = 0.4;
+    var on = el < 2500;
+    poseScaleT = on ? 0.9 : 1; poseGapT = on ? 5 : 0;
+    shapeIf(on, 1, 1.05, beat.side < 0 ? 0.35 : 0, 1, 1.05, beat.side > 0 ? 0.35 : 0, 0);
+    pathAt(el, [[0, 0, 0], [300, beat.side * 26, -4], [2300, beat.side * 26, -4], [2700, 0, 0]]);
+  } },
+  doubleBlink: { w: 9, dur: 900, run: function (el, t) {
+    if (!beat.b1 && el > 40) { beat.b1 = true; forceBlink(t); }
+    if (!beat.b2 && el > 380) { beat.b2 = true; forceBlink(t); }
+  } },
+  squint: { w: 5, dur: 2400, run: function (el) {
+    shapeIf(el < 1700, 1.04, 0.5, 0.4, 1.04, 0.5, 0.4, 0);
+    pathAt(el, [[0, 0, 0], [200, -8, 2], [1700, 0, 0]]);
+  } },
+  sigh: { w: 5, dur: 2800, say: ['...'], sayP: 0.3, run: function (el) {
+    lookK = 0.12;
+    shapeIf(el < 1900, 1, 0.82, -0.3, 1, 0.82, -0.3, 0);
+    pathAt(el, [[0, 0, 0], [300, 0, 14], [1900, 0, 0]]);
+  } },
+  stretch: { w: 4, dur: 2600, say: ['ahh~'], sayP: 0.4, run: function (el) {   // tall, then wide and squashed
+    lookTX = 0;
+    if (el < 900) { shape(0.8, 1.28, 0, 0.8, 1.28, 0, 0); lookTY = -10; poseScaleT = 1.05; }
+    else if (el < 1500) { shape(1.14, 0.72, 0, 1.14, 0.72, 0, 0); lookTY = 6; poseScaleT = 1; }
+    else { tgt = [mood.L, mood.R]; lookTY = 0; poseScaleT = 1; }
+  } },
+  wiggle: { w: 5, dur: 2000, run: function (el) {
+    shapeIf(el < 1300, 1, 0.95, 0, 1, 0.95, 0, 1);
+    lookTX = (el < 1100) ? ((Math.floor(el / 130) % 2) ? 10 : -10) : 0; lookTY = 0;
+  } },
+  bounce: { w: 5, dur: 2200, run: function (el) {
+    var on = el < 1900;
+    shapeIf(on, 1, 0.95, 0, 1, 0.95, 0, 1);
+    poseScaleT = on ? 1.04 : 1;
+    lookTX = 0; lookTY = on ? -14 * Math.abs(Math.sin(Math.PI * el / 480)) : 0;
+  } },
+  sway: { w: 4, dur: 3000, run: function (el) {
+    shapeIf(el < 2600, 1, 0.95, 0, 1, 0.95, 0, 1);
+    lookTX = (el < 2600) ? 16 * Math.sin(el / 300) : 0; lookTY = -2;
+  } },
+  peekAtYou: { w: 3, dur: 3400, say: ['hi!'], sayP: 0.4, run: function (el) {   // shy, then a smile
+    lookK = 0.3;
+    var on = el < 3000;
+    poseScaleT = on ? 0.82 : 1; poseGapT = on ? 8 : 0;
+    lookTX = 0; lookTY = 0;
+    if (el < 2200) { shape(1, 1, -0.25, 1, 1, -0.25, 0); }
+    else if (on) { shape(1, 1, 0, 1, 1, 0, 1); }
+    else { tgt = [mood.L, mood.R]; }
+  } },
+  followFly: { w: 3, dur: 5600, say: ['ooh'], sayP: 0.5, run: function (el) {
+    lookK = 0.5;
+    if (el < 4800) {
+      poseScaleT = 0.86; tgt = [mood.L, mood.R];
+      lookTX = 42 * Math.sin(el / 430); lookTY = -12 + 10 * Math.sin(el / 290);
+    } else {                                                 // got it!
+      poseScaleT = 1; lookTX = 0; lookTY = 0;
+      shape(0.78, 1.2, 0, 0.78, 1.2, 0, 0);
+    }
+  } },
+  yawn: { w: 2, dur: 3200, say: ['*yawn*'], sayP: 1, run: function (el) {    // eyes squeeze shut, then open slowly
+    lookK = 0.25; lookTX = 0;
+    if (el < 1700) { shape(1.08, 0.28, 0.2, 1.08, 0.28, 0.2, 0); lookTY = -8; }
+    else if (el < 2500) { shape(1, 0.8, 0, 1, 0.8, 0, 0); lookTY = 4; }
+    else { tgt = [mood.L, mood.R]; lookTY = 0; }
+  } },
+  shy: { w: 3, dur: 2600, run: function (el) {
+    lookK = 0.3;
+    poseScaleT = (el < 2000) ? 0.85 : 1;
+    shapeIf(el < 2000, 0.95, 0.9, -0.3, 0.95, 0.9, -0.3, 0);
+    pathAt(el, [[0, 0, 0], [300, -30, 14], [2000, -30, 14], [2400, 0, 0]]);
+  } },
+  nod: { w: 0, dur: 2400, run: function (el) {              // drowsy only: the head dips and jerks up
+    lookK = 0.2;
+    shapeIf(el < 1700, 1.04, 0.6, 0.3, 1.04, 0.6, 0.3, 0);
+    pathAt(el, [[0, 0, 0], [300, 0, 18], [1000, 0, 18], [1200, 0, -4], [1500, 0, 10], [2000, 0, 0]]);
+  } }
+};
+var BEAT_DROWSY = { yawn: 8, nod: 10, squint: 6, sigh: 5 };
+var BEAT_LONELY = { sigh: 8, peekDoor: 8, clockGlance: 6, shy: 6, lookLR: 4, lookUp: 3, squint: 2 };
+var TOD_MORNING = { stretch: 4, yawn: 1.5, bounce: 1.5, sway: 1.5 };                                // before 10:00
+var TOD_EVENING = { bounce: 0.5, scan: 0.5, wiggle: 0.6, sigh: 1.5, yawn: 1.5 };                    // from 19:00
+var TOD_LATE = { bounce: 0.2, scan: 0.3, wiggle: 0.3, yawn: 3, squint: 2, sigh: 2 };                // from 21:30
+
+function beatPick() {
+  var d = clockDate(), h = d ? d.getUTCHours() + d.getUTCMinutes() / 60 : 12;
+  var tod = (h < 10) ? TOD_MORNING : (h >= 21.5) ? TOD_LATE : (h >= 19) ? TOD_EVENING : null;
+  var set = (stage === ST_DROWSY) ? BEAT_DROWSY : (stage === ST_LONELY) ? BEAT_LONELY : null;
+  var names = [], ws = [], total = 0, name, wgt;
+  for (name in BEATS) {
+    if (name === beatLast[0] || name === beatLast[1]) { continue; }   // never the same thing twice running
+    wgt = set ? (set[name] || 0) : BEATS[name].w;
+    if (!set && tod && tod[name]) { wgt *= tod[name]; }
+    if (wgt > 0) { names.push(name); ws.push(wgt); total += wgt; }
+  }
+  if (!names.length) { return 'doubleBlink'; }
+  var r = Math.random() * total;
+  for (var i = 0; i < names.length; i++) { r -= ws[i]; if (r <= 0) { return names[i]; } }
+  return names[names.length - 1];
+}
+function beatGap() {                                         // 8-20 s, sometimes a long still moment
+  if (FORCE_BEAT) { return 1500; }
+  return rnd(8000, 20000) * PACE_MUL[PACE] * (Math.random() < 0.15 ? 2.2 : 1) * TS;
+}
+function beatOK() {                                          // real things win: a notice, a touch, a reaction, a prop, sleep
+  return !notice && !connLost && !act && !dragging && !morningRoutine && !weatherRoutine &&
+         !(toast && now() < toast.until) && mood.name !== 'asleep' && now() - lastTouch > 3000;
+}
+function beatIdle() { lookK = 0.35; poseScaleT = 1; poseGapT = 0; }
+function beatRestore() {
+  tgt = [mood.L, mood.R]; beatIdle(); lookTX = mood.lx; lookTY = mood.ly;
+  if (beat && beat.noted) { curKey = ''; }                   // puts the word on screen back to what the face wants
+}
+function beatEnd(t) { beatRestore(); beat = null; beatNext = t + beatGap(); }
+function beatCancel() { beatRestore(); beat = null; beatNext = now() + 2000; }
+function beatStart(nm, t) {
+  var b = BEATS[nm];
+  beat = { name: nm, start: t, dur: b.dur, side: (Math.random() < 0.5) ? -1 : 1, noted: false };
+  beatLast = [nm, beatLast[0]];
+  if (b.say && Math.random() < b.sayP) {
+    setText(noteEl, b.say[Math.floor(Math.random() * b.say.length)]);
+    beat.noted = true;
+  }
+}
+function beatTick(t) {                                       // true while a beat is steering the gaze
+  if (!beat) {
+    if (t < beatNext) { beatIdle(); return false; }
+    var nm = beatPlan || FORCE_BEAT || beatPick();
+    beatPlan = '';
+    if (!BEATS[nm]) { beatNext = t + 5000; return false; }
+    beatStart(nm, t);
+  }
+  var el = t - beat.start;
+  if (el >= beat.dur) { beatEnd(t); return false; }
+  BEATS[beat.name].run(el, t);
+  return true;
+}
+function beatStep(t) {
+  beatRan = false;
+  if (!beatOK()) { if (beat) { beatCancel(); } beatIdle(); return; }
+  beatRan = beatTick(t);
 }
 
 // reaction to being poked repeatedly
@@ -574,14 +786,30 @@ function poke(c) {
     toastNow('', c % 2 ? 'happy' : 'wink', null, 2000);
     return;
   }
+  if (sleeping) {                                            // half asleep: no games, just annoyed sooner
+    if (c <= 2) { toastNow('zzz...', 'sleepy', c === 1 ? 'happy' : 'surprised', c === 1 ? 1800 : 2200); }
+    else { toastNow(c === 3 ? 'Let me sleep!' : 'LET ME SLEEP!', 'angry', 'angry', 5000, SULK, c > 3); }
+    return;
+  }
+  // awake: it plays along through a string of moods first, then loses patience (7 = warning, 8+ = furious).
+  // Sounds here are allowed on the panel too (notice flag), so the escalation is heard.
+  act = null; curKey = '';                                   // a new tap cuts off whatever routine was running
   if (c === 1) {
-    toastNow(sleeping ? 'zzz...' : (Math.random() < 0.4 ? 'bip!' : ''), sleeping ? 'sleepy' : 'happy', 'happy', 1800);
+    toastNow(Math.random() < 0.4 ? 'bip!' : '', 'happy', null, 1800); playSound('happy', false, true);
   } else if (c === 2) {
-    toastNow(sleeping ? 'zzz...' : '!?', sleeping ? 'sleepy' : 'surprised', 'surprised', 2200);
+    toastNow('!?', 'surprised', null, 2200); playSound('surprised', false, true);
   } else if (c === 3) {
-    toastNow(sleeping ? 'Let me sleep!' : 'hey!', 'angry', 'angry', 5000, SULK);
+    toastNow('', 'wink', null, 1800); playSound('wink', false, true);
+  } else if (c === 4) {
+    startAct('giggle', 'hehe', true); act.dur = 1600;
+  } else if (c === 5) {
+    toastNow('hmm...', 'thinking', null, 2200); playSound('thinking', false, true);
+  } else if (c === 6) {
+    startAct('love', '');
+  } else if (c === 7) {
+    toastNow('hey!', 'angry', null, 5000, SULK); playSound('angry', false, true);
   } else {
-    toastNow(sleeping ? 'LET ME SLEEP!' : 'STOP IT!', 'angry', 'angry', 5000, SULK, true);
+    toastNow('STOP IT!', 'angry', null, 5000, SULK, true); playSound('angry', false, true);
   }
 }
 
@@ -608,14 +836,14 @@ function applyColor() {
   if (n !== colorNight) {
     colorNight = n;
     if (!n && serverTs && !HALLOWEEN) {         // night -> day
-      lastTouch = now();
-      sleepAfter = rnd(S_MIN, S_MAX);
-      idleMood = 0;
-      nextIdleChange = now() + rnd(12000 * TS, 22000 * TS);
+      lastTouch = now(); resetIdle();
       toastNow('Good morning!', 'happy', null, 5000);
+      beatPlan = 'stretch'; beatNext = now() + 5200;       // and a good stretch
+    } else if (n && serverTs && !HALLOWEEN && now() - bootAt > 60000) {   // not on every timed reload
+      toastNow('Sleep well', 'sleepy', null, 4000);
     }
   }
-  var c = (morningShowing || weatherRoutine) ? '#3af' : (n || stage === 6) ? ASLEEP_COLOR : (MOOD_COLORS[mood.name] || '#3af');
+  var c = (morningShowing || weatherRoutine) ? '#3af' : (n || stage === ST_NAP) ? ASLEEP_COLOR : (MOOD_COLORS[mood.name] || '#3af');
   if (HALLOWEEN) { c = mood.name === 'asleep' ? '#733' : '#f44'; }
   if (!HALLOWEEN && (mood.name === 'devil' || mood.name === 'angry') && toast && toast.shake && now() < toast.until) {
     c = FURY_COLORS[Math.floor(now() / 150) % 2];
@@ -633,9 +861,12 @@ function fin(v, d) { return (v === v && v !== Infinity && v !== -Infinity) ? v :
 
 function drawEye(e, blinkF) {
   var p = cur[e];
-  var w = p.w, h = p.h * blinkF;
+  var persp = 1 + (e === 0 ? 1 : -1) * 0.2 * Math.max(-1, Math.min(1, lookX / 60));   // head turns: the far eye looks narrower
+  var w = p.w * poseScale * (1 + squash) * persp, h = p.h * blinkF * poseScale * (1 - squash);
+  if (w < 8) { w = 8; }
   if (h < 3) { h = 3; }
-  var cx = EX[e] + (e === 0 ? weatherEyeInset : -weatherEyeInset) + morningEyeShift + lookX, cy = CY + lookY;
+  var gapIn = weatherEyeInset + poseGap;
+  var cx = EX[e] + (e === 0 ? gapIn : -gapIn) + morningEyeShift + lookX, cy = CY + lookY;
   var r = Math.min(26, h / 2, w / 2);
   var sw = w / N;
   var left = cx - w / 2;
@@ -713,7 +944,7 @@ function drawHorns() {
 }
 
 function updateTear(t) {                                                 // lonely: a tear rolls down now and then
-  var show = !morningShowing && !weatherRoutine && (stage === 2 || stage === 3) && !notice && !act && !(toast && t < toast.until);
+  var show = !morningShowing && !weatherRoutine && stage === ST_LONELY && !notice && !act && !(toast && t < toast.until);
   if (show && tearStart === 0 && t >= nextTear) { tearStart = t; nextTear = t + rnd(4000, 7000); }
   if (tearStart === 0) { return; }
   var p = (t - tearStart) / 1500;
@@ -849,6 +1080,7 @@ function frameWork() {
 
   // scripted routines take over the gaze until they finish
   if (act) {
+    if (beat) { beatCancel(); }
     var el = t - act.start;
     if (el >= act.dur) { act = null; curKey = ''; nextLook = t + 800; }
     else if (act.name === 'song') {
@@ -875,10 +1107,14 @@ function frameWork() {
       setMood(w.mood);
       setText(noteEl, w.text);
     }
+    beatRan = false;
+    if (mood.name !== 'asleep' && !dragging && !(toast && toast.shake && t < toast.until)) { safe('director', beatStep, t); }
+    else if (beat) { beatCancel(); }
     if (mood.name === 'asleep' && !dragging) {              // dozing: breathing, z's, random dreams
       safe('sleepTick', sleepTick, t);
     } else if (toast && toast.shake && t < toast.until) {   // furious: trembling
       lookTX = (Math.floor(t / 60) % 2) ? 7 : -7;
+    } else if (beatRan) {                                   // a small action of its own is steering the gaze
     } else if (!dragging && t >= nextLook) {                // wandering gaze (only when nobody is touching it)
       nextLook = t + rnd(1200, 3500);
       lookTX = mood.lx + rnd(-18, 18);
@@ -899,8 +1135,12 @@ function frameWork() {
     cur[e].tri = ease(cur[e].tri, tgt[e].tri || 0, 0.42);
   }
   lookTX = fin(lookTX, 0); lookTY = fin(lookTY, 0);        // old IE throws on NaN sizes: never let one through
-  lookX = fin(ease(lookX, lookTX, 0.35), 0);
-  lookY = fin(ease(lookY, lookTY, 0.35), 0);
+  lookK = fin(lookK, 0.35);
+  lookX = fin(ease(lookX, lookTX, lookK), 0);
+  lookY = fin(ease(lookY, lookTY, lookK), 0);
+  poseScale = fin(ease(poseScale, poseScaleT, 0.3), 1);
+  poseGap = fin(ease(poseGap, poseGapT, 0.3), 0);
+  squash = fin(ease(squash, Math.min(0.1, Math.abs(lookTX - lookX) / 250), 0.5), 0);   // eyes flatten a little when they move fast
 
   safe('drawEye0', drawEye, 0, blinkF);
   safe('drawEye1', drawEye, 1, (mood.name === 'wink' && blinkF < 1) ? blinkF : (mood.name === 'wink' ? 1 : blinkF));
@@ -944,11 +1184,10 @@ function dbg(s) { if (DEBUG) { setText(labelEl, s); labelUntil = 0; } }
 
 function touchStart(q) {
   dragging = true; moved = false; downAt = now(); downX = q.x; downY = q.y;
-  welcomeBack = (stage >= 2);                        // was it lonely before this touch?
+  welcomeBack = (stage === ST_LONELY);               // was it lonely before this touch?
+  wokeFromNap = (stage === ST_NAP);                  // or dozing?
   lastTouch = now();
-  sleepAfter = rnd(S_MIN, S_MAX);                    // next time it is left alone, a new random bedtime
-  idleMood = 0;
-  nextIdleChange = now() + rnd(12000 * TS, 22000 * TS);
+  resetIdle();                                       // a touch starts the drowsy and lonely clocks again
   lookTX = (q.x - W / 2) / (W / 2) * 30;
   lookTY = (q.y - H / 2) / (H / 2) * 18;
   dbg('down ' + q.x + ',' + q.y);
@@ -987,6 +1226,7 @@ function touchEnd() {
     toastNow('on it!', 'happy', null, 1500);              // proud to have delivered the message
     return;
   }
+  if (wokeFromNap) { wokeFromNap = false; toastNow('...huh?', 'surprised', null, 1800); return; }
   if (welcomeBack) { joy(); return; }                         // it missed you
   if (held > HOLD_MS) { startAct('giggle', 'hehehe'); return; }
   var t = now();
@@ -1049,7 +1289,7 @@ initWeather();
 var RELOAD_MS = 10 * 60 * 1000;   // reload the page every 10 minutes; later change to 60 * 60 * 1000 for every hour
 function reloadNow() {
   if (dragging) { setTimeout(reloadNow, 5000); return; }          // never reload under someone's finger
-  try { window.name = 'bit:' + lastTouch + ':' + napUntil; } catch (err) { }
+  try { window.name = 'bit:' + lastTouch + ':' + napUntil + ':' + lastRest + ':' + napPhase + ':' + napPhaseEnd; } catch (err) { }
   window.location.replace(window.location.pathname + '?r=' + now() + window.location.hash);
 }
 if (!STANDALONE) { setTimeout(reloadNow, RELOAD_MS); }

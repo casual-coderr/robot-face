@@ -53,6 +53,36 @@
   </section>
 
   <section class="card">
+    <h2>Liveliness</h2>
+    <p class="sub" style="margin-bottom: 10px">How much Bit does on its own when nobody is touching it.</p>
+    <div class="grid" id="paces"></div>
+    <label for="beat" style="margin-top: 14px">Try one of its small actions now</label>
+    <div class="row">
+      <select id="beat">
+        <option value="lookLR">Look left and right</option>
+        <option value="lookUp">Look up</option>
+        <option value="peekDoor">Glance at the door</option>
+        <option value="clockGlance">Glance at the clock</option>
+        <option value="scan">Scan the room</option>
+        <option value="curious">Curious</option>
+        <option value="doubleBlink">Double blink</option>
+        <option value="squint">Squint</option>
+        <option value="sigh">Sigh</option>
+        <option value="stretch">Stretch</option>
+        <option value="wiggle">Wiggle</option>
+        <option value="bounce">Bounce</option>
+        <option value="sway">Sway</option>
+        <option value="peekAtYou">Peek at you</option>
+        <option value="followFly">Follow a fly</option>
+        <option value="yawn">Yawn</option>
+        <option value="shy">Shy</option>
+        <option value="nod">Nod off</option>
+      </select>
+      <button type="button" class="primary" id="dobeat" style="margin-top: 0">Do it</button>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>Feelings</h2>
     <div class="grid" id="feelings"></div>
   </section>
@@ -101,6 +131,11 @@
     ['normal', '\u{1F916}', 'Normal', 'blue eyes, usual routine'],
     ['halloween', '\u{1F608}', 'Halloween', 'playful red eyes, horns & weather']
   ];
+  var PACES = [
+    ['pace_calm', '\u{1F40C}', 'Calm', 'now and then'],
+    ['pace_normal', '\u{1F642}', 'Normal', 'every 8-20 s'],
+    ['pace_lively', '\u{1F407}', 'Lively', 'often']
+  ];
   var FEELINGS = [
     ['happy', '\u{1F604}', 'Happy', 'yay!'],
     ['wink', '\u{1F609}', 'Wink', 'one eye'],
@@ -138,6 +173,7 @@
     fetch(url).then(function (r) { return r.json(); }).then(function (j) {
       if (j.ok) {
         if (j.mode) { showMode(j.mode); say(label + ' mode selected.'); }
+        else if (j.pace) { showPace(j.pace); say('Liveliness: ' + label + '.'); }
         else { say('Sent: ' + label + '. Bit will do it in a moment.'); }
       }
       else { say('Bit did not understand that one.', true); }
@@ -152,6 +188,9 @@
       if (c[0] === 'normal' || c[0] === 'halloween') {
         b.setAttribute('data-mode', c[0]); b.setAttribute('aria-pressed', 'false');
       }
+      if (c[0].indexOf('pace_') === 0) {
+        b.setAttribute('data-pace', c[0].substring(5)); b.setAttribute('aria-pressed', 'false');
+      }
       var ico = document.createElement('span'); ico.className = 'ico'; ico.textContent = c[1];
       var name = document.createElement('b'); name.textContent = c[2];
       var hint = document.createElement('small'); hint.textContent = c[3];
@@ -165,8 +204,18 @@
       b.setAttribute('aria-pressed', b.getAttribute('data-mode') === mode ? 'true' : 'false');
     });
   }
+  function showPace(pace) {
+    document.querySelectorAll('[data-pace]').forEach(function (b) {
+      b.setAttribute('aria-pressed', b.getAttribute('data-pace') === pace ? 'true' : 'false');
+    });
+  }
   build(MODES, document.getElementById('modes'));
-  fetch('/api/state').then(function (r) { return r.json(); }).then(function (s) { showMode(s.mode || 'normal'); });
+  build(PACES, document.getElementById('paces'));
+  fetch('/api/state').then(function (r) { return r.json(); }).then(function (s) { showMode(s.mode || 'normal'); showPace(s.pace || 'normal'); });
+  document.getElementById('dobeat').addEventListener('click', function () {
+    var sel = document.getElementById('beat');
+    send('behave', '&text=' + encodeURIComponent(sel.value), sel.options[sel.selectedIndex].text, this);
+  });
   build(FEELINGS, document.getElementById('feelings'));
   build(TRICKS, document.getElementById('tricks'));
 

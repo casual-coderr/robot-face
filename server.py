@@ -27,13 +27,13 @@ from weather import MorningWeather
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = 8765
-NIGHT = [21, 7]            # face sleeps (quiet, dim) from 21:00 to 07:00
+NIGHT = [22.5, 7]          # face sleeps (quiet, dim) from 22:30 to 07:00 (hours, fractions allowed)
 MOODS = ["normal", "happy", "wink", "angry", "sad", "surprised", "thinking", "sleepy", "pumpkin", "devil"]
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 SOUND_MODE = "alerts"      # panel sounds: "all" = every reaction, "alerts" = reminders and notices only, "off"
 FLIP_CLIENTS = set()   # flip is off: the panel has no upside-down letters (page ignores this for now)
 COMMAND_NAMES = ["happy", "wink", "angry", "furious", "sad", "lonely", "surprised", "thinking", "yawn", "sleep",
-                 "hello", "giggle", "song", "love", "heart", "lookaround", "read", "nap", "wake", "say", "normal", "halloween"]
+                 "hello", "giggle", "song", "love", "heart", "lookaround", "read", "nap", "wake", "say", "normal", "halloween", "behave", "pace_calm", "pace_normal", "pace_lively"]
 COMMANDS_PAGE_PATHS = ("/commands", "/command")
 REMINDERS_PAGE_PATHS = ("/reminders", "/reminder", "/remidners")   # the last one is a typo that is easy to make
 
@@ -48,20 +48,37 @@ counter = 0
 last_cmd = None             # the newest command from /commands; the face runs each one once
 fired = set()              # (date, reminder id) already shown
 
-def face_mode():
-    """Read the saved mode so the choice survives server and panel restarts."""
+def settings():
+    """face-mode.json holds the saved choices (mode, pace) so they survive server and panel restarts."""
     try:
         with open(MODE_PATH, encoding="utf-8") as f:
-            return "halloween" if json.load(f).get("mode") == "halloween" else "normal"
-    except (OSError, ValueError, AttributeError):
-        return "normal"
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def face_mode():
+    return "halloween" if settings().get("mode") == "halloween" else "normal"
+
+
+def face_pace():
+    """How lively Bit is when left alone: calm, normal or lively."""
+    pace = settings().get("pace")
+    return pace if pace in ("calm", "lively") else "normal"
+
+
+def save_settings(**changes):
+    with mode_lock:
+        data = settings()
+        data.update(changes)
+        with open(MODE_PATH + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(MODE_PATH + ".tmp", MODE_PATH)
 
 
 def set_face_mode(mode):
-    with mode_lock:
-        with open(MODE_PATH + ".tmp", "w", encoding="utf-8") as f:
-            json.dump({"mode": mode}, f)
-        os.replace(MODE_PATH + ".tmp", MODE_PATH)
+    save_settings(mode=mode)
 
 
 weather = MorningWeather(mode=face_mode)
@@ -282,7 +299,7 @@ class Handler(SimpleHTTPRequestHandler):
             ts = int(time.time() + off)
             state = {"ts": ts, "night": NIGHT, "notice": current_notice(),
                      "flip": self.client_address[0] in FLIP_CLIENTS, "sound": SOUND_MODE,
-                     "build": build_id(), "cmd": current_cmd(), "mode": face_mode(), "weather": weather.state()}
+                     "build": build_id(), "cmd": current_cmd(), "mode": face_mode(), "pace": face_pace(), "weather": weather.state()}
             cb = q.get("cb", "")
             if cb:
                 # script-tag reply for the panel's old browser: onState({...});
@@ -315,6 +332,12 @@ class Handler(SimpleHTTPRequestHandler):
                 except OSError:
                     return self.send_json({"ok": False, "error": "Mode could not be saved"}, 500)
                 return self.send_json({"ok": True, "mode": name})
+            if name.startswith("pace_"):
+                try:
+                    save_settings(pace=name[5:])
+                except OSError:
+                    return self.send_json({"ok": False, "error": "Pace could not be saved"}, 500)
+                return self.send_json({"ok": True, "pace": name[5:]})
             cid = add_command(name, q.get("text", ""), q.get("mood", ""))
             return self.send_json({"ok": True, "id": cid})
         if u.path == "/api/notify":
